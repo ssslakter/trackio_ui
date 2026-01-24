@@ -60,6 +60,39 @@ headers = [
         .sidebar-hidden #sidebar { width: 0px !important; min-width: 0px !important; overflow: hidden; border: none; }
         .sidebar-hidden .gutter { display: none; }
         #sidebar-toggle { position: absolute; bottom: 20px; left: 20px; z-index: 50; }
+
+        .chart-modal-backdrop {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+        }
+        .chart-modal-backdrop.is-visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        .chart-modal-content {
+            background-color: hsl(var(--card));
+            color: hsl(var(--card-foreground));
+            width: 90vw;
+            height: 85vh;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+        }
+        .modal-chart-container {
+            flex-grow: 1;
+            min-height: 0; /* Important for flexbox sizing */
+        }
     """
     ),
 ]
