@@ -3,13 +3,14 @@ authors = [
     { name = "Slava", email = "67190162+Ssslakter@users.noreply.github.com" },
 ]
 dependencies = [
-    "orjson>=3.11.5,<4",
-    "polars>=1.37.1,<2",
-    "monsterui>=1.0.42,<2",
+    "orjson",
+    "polars",
+    "monsterui",
     "black",
-    "click>=8.3.1,<9",
-    "pandas>=3.0.0,<4",
-    "pyarrow>=23.0.0,<24",
+    "click",
+    "pandas",
+    "pyarrow",
+    "trackio",
 ]
 name = "trackio_ui"
 requires-python = ">= 3.11"
