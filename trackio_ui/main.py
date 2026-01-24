@@ -40,7 +40,7 @@ headers = [
 
 databases = {}
 app, rt = fast_app(hdrs=headers, 
-                   static_path=files("trackio_ui") / "static", 
+                   static_path=files("trackio_ui"), 
                    secret_key="secret", 
                    key_fname=Path(tempfile.gettempdir()) / ".trackio_ui_sesskey")
 
@@ -180,7 +180,6 @@ def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float =
 
     db = get_db(project_name)
     raw_data = db.get_metrics(runs)
-    print("Found", *raw_data.keys())
     resp = orjson.dumps(
         {"data": prepare_metrics(raw_data)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
     )
