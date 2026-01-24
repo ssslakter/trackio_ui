@@ -108,7 +108,7 @@ def index(sess: dict, project_name: str):
                             checked=prefs.get("refresh", False),
                             cls="checkbox checkbox-sm checkbox-accent mr-2",
                         ),
-                        Label("Refresh (no cache)", cls="font-semibold text-sm cursor-pointer", htmlFor="refresh-checkbox"),
+                        Label("no cache", cls="font-semibold text-sm cursor-pointer", htmlFor="refresh-checkbox"),
                         cls="flex items-center pt-2",
                     ),
                     cls="p-6 border-b space-y-4",
@@ -133,20 +133,12 @@ def index(sess: dict, project_name: str):
                 cls="flex flex-col h-full flex-1"
             ),
             Div(
-                Button(
-                    "Submit",
-                    type="submit",
-                    cls="btn btn-primary w-full mt-2",
-                    hx_get=f"/{project_name}/data",
-                    hx_trigger="click",
-                    hx_swap="none",
-                    hx_on_htmx_after_request="updateDashboard(event)",
-                ),
+                Button("Refresh", cls=(ButtonT.primary, "w-full", "mt-2")),
                 cls="p-4 border-t bg-card sticky bottom-0 z-10"
             ),
             cls="flex flex-col h-[calc(100%-4rem)]",
             hx_get=f"/{project_name}/data",
-            hx_trigger="change delay:500ms, load",
+            hx_trigger="change delay:500ms, load, submit",
             hx_swap="none",
             hx_on_htmx_after_request="updateDashboard(event)",
         ),
