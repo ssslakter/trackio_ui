@@ -6,8 +6,11 @@ dependencies = [
     "orjson>=3.11.5,<4",
     "polars>=1.37.1,<2",
     "monsterui>=1.0.42,<2",
-    "black"
-, "click>=8.3.1,<9", "pandas>=3.0.0,<4"]
+    "black",
+    "click>=8.3.1,<9",
+    "pandas>=3.0.0,<4",
+    "pyarrow>=23.0.0,<24",
+]
 name = "trackio_ui"
 requires-python = ">= 3.11"
 version = "0.1.0"

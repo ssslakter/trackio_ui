@@ -99,6 +99,17 @@ def index(sess: dict, project_name: str):
                     Label("Select All Runs", cls="font-semibold text-sm cursor-pointer", htmlFor="select-all"),
                     cls="flex items-center pt-2",
                 ),
+                Div(
+                    CheckboxX(
+                        name="refresh",
+                        id="refresh-checkbox",
+                        value="1",
+                        checked=prefs.get("refresh", False),
+                        cls="checkbox checkbox-sm checkbox-accent mr-2",
+                    ),
+                    Label("Refresh (no cache)", cls="font-semibold text-sm cursor-pointer", htmlFor="refresh-checkbox"),
+                    cls="flex items-center pt-2",
+                ),
                 cls="p-6 border-b space-y-4",
             ),
             Div(
@@ -116,6 +127,18 @@ def index(sess: dict, project_name: str):
                     for r in runs
                 ],
                 cls="flex-1 overflow-y-auto p-4 space-y-1",
+            ),
+            Div(
+                Button(
+                    "Submit",
+                    type="submit",
+                    cls="btn btn-primary w-full mt-2",
+                    hx_get=f"/{project_name}/data",
+                    hx_trigger="click",
+                    hx_swap="none",
+                    hx_on_htmx_after_request="updateDashboard(event)",
+                ),
+                cls="p-4 border-t"
             ),
             cls="flex flex-col h-[calc(100%-4rem)]",
             hx_get=f"/{project_name}/data",
@@ -169,17 +192,18 @@ def index(sess: dict, project_name: str):
 
 
 @rt("/{project_name}/data")
-def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, downsample: int = 1):
+def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, downsample: int = 1, refresh: bool = False):
     sess[f"prefs_{project_name}"] = {
         "selected_runs": runs or [],
         "smoothing": str(smoothing),
         "downsample": str(downsample),
+        "refresh": bool(refresh),
     }
     if not runs:
         return json.dumps({"data": {}})
 
     db = get_db(project_name)
-    raw_data = db.get_metrics(runs)
+    raw_data = db.get_metrics(runs, refresh=bool(refresh))
     resp = orjson.dumps(
         {"data": prepare_metrics(raw_data)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
     )
