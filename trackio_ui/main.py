@@ -71,62 +71,66 @@ def index(sess: dict, project_name: str):
         ),
         Details(Summary("change theme"), ThemePicker()),
         Form(
-            DivVStacked(
-                LabelRange(
-                    label="Smoothing",
-                    name="smoothing",
-                    min="0",
-                    max="0.99",
-                    step="0.01",
-                    value=prefs.get("smoothing", "0.6"),
-                    cls="w-full",
-                ),
-                LabelRange(
-                    label="Downsample",
-                    name="downsample",
-                    min="1",
-                    max="100",
-                    step="1",
-                    value=prefs.get("downsample", "1"),
-                    cls="w-full",
-                ),
-                Div(
-                    CheckboxX(
-                        id="select-all",
-                        cls="checkbox checkbox-sm checkbox-primary mr-2",
-                        onclick="let c = this.checked; document.querySelectorAll('input[name=runs]').forEach(el => el.checked = c); htmx.trigger(this.closest('form'), 'change')",
-                    ),
-                    Label("Select All Runs", cls="font-semibold text-sm cursor-pointer", htmlFor="select-all"),
-                    cls="flex items-center pt-2",
-                ),
-                Div(
-                    CheckboxX(
-                        name="refresh",
-                        id="refresh-checkbox",
-                        value="1",
-                        checked=prefs.get("refresh", False),
-                        cls="checkbox checkbox-sm checkbox-accent mr-2",
-                    ),
-                    Label("Refresh (no cache)", cls="font-semibold text-sm cursor-pointer", htmlFor="refresh-checkbox"),
-                    cls="flex items-center pt-2",
-                ),
-                cls="p-6 border-b space-y-4",
-            ),
             Div(
-                *[
+                DivVStacked(
+                    LabelRange(
+                        label="Smoothing",
+                        name="smoothing",
+                        min="0",
+                        max="0.99",
+                        step="0.01",
+                        value=prefs.get("smoothing", "0.6"),
+                        cls="w-full",
+                    ),
+                    LabelRange(
+                        label="Downsample",
+                        name="downsample",
+                        min="1",
+                        max="100",
+                        step="1",
+                        value=prefs.get("downsample", "1"),
+                        cls="w-full",
+                    ),
                     Div(
                         CheckboxX(
-                            name="runs",
-                            value=r,
-                            checked=(r in prefs.get("selected_runs", [])),
-                            cls="checkbox checkbox-sm checkbox-primary mr-3",
+                            id="select-all",
+                            cls="checkbox checkbox-sm checkbox-primary mr-2",
+                            onclick="let c = this.checked; document.querySelectorAll('input[name=runs]').forEach(el => el.checked = c); htmx.trigger(this.closest('form'), 'change')",
                         ),
-                        Span(r, cls="truncate text-sm"),
-                        cls="flex items-center hover:bg-muted/50 p-2 rounded-md cursor-pointer transition-colors",
-                    )
-                    for r in runs
-                ],
-                cls="flex-1 overflow-y-auto p-4 space-y-1",
+                        Label("Select All Runs", cls="font-semibold text-sm cursor-pointer", htmlFor="select-all"),
+                        cls="flex items-center pt-2",
+                    ),
+                    Div(
+                        CheckboxX(
+                            name="refresh",
+                            id="refresh-checkbox",
+                            value="1",
+                            checked=prefs.get("refresh", False),
+                            cls="checkbox checkbox-sm checkbox-accent mr-2",
+                        ),
+                        Label("Refresh (no cache)", cls="font-semibold text-sm cursor-pointer", htmlFor="refresh-checkbox"),
+                        cls="flex items-center pt-2",
+                    ),
+                    cls="p-6 border-b space-y-4",
+                ),
+                Div(
+                    *[
+                        Div(
+                            CheckboxX(
+                                name="runs",
+                                value=r,
+                                checked=(r in prefs.get("selected_runs", [])),
+                                cls="checkbox checkbox-sm checkbox-primary mr-3",
+                            ),
+                            Span(r, cls="truncate text-sm"),
+                            cls="flex items-center hover:bg-muted/50 p-2 rounded-md cursor-pointer transition-colors",
+                        )
+                        for r in runs
+                    ],
+                    cls="flex-1 overflow-y-auto p-4 space-y-1",
+                    style="min-height:0;max-height:40vh;"
+                ),
+                cls="flex flex-col h-full flex-1"
             ),
             Div(
                 Button(
@@ -138,7 +142,7 @@ def index(sess: dict, project_name: str):
                     hx_swap="none",
                     hx_on_htmx_after_request="updateDashboard(event)",
                 ),
-                cls="p-4 border-t"
+                cls="p-4 border-t bg-card sticky bottom-0 z-10"
             ),
             cls="flex flex-col h-[calc(100%-4rem)]",
             hx_get=f"/{project_name}/data",
@@ -205,7 +209,7 @@ def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float =
     db = get_db(project_name)
     raw_data = db.get_metrics(runs, refresh=bool(refresh))
     resp = orjson.dumps(
-        {"data": prepare_metrics(raw_data)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
+        {"data": prepare_metrics(raw_data, smoothing, downsample)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
     )
     return Response(content=resp, media_type="application/json")
 
