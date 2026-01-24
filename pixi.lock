@@ -3052,7 +3052,7 @@ packages:
 - pypi: ./
   name: trackio-ui
   version: 0.1.0
-  sha256: 326b8e3c9d18d397f2b1c0ec377315c11e58b6f54ffa6c0d1efb1e8031957f1e
+  sha256: c815b12b5f38ff7e699d1a43f3c6d16234f90b0403cc22809ced8e6c60ceb7c6
   requires_dist:
   - orjson
   - polars

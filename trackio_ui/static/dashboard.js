@@ -1,91 +1,268 @@
-const chartInstances = new Map();
+/**
+ * Lazy-Load Dashboard for Trackio
+ * Solves "Unresponsive" issues by strictly processing only visible charts.
+ */
 
-function toggleSidebar() {
-    const wrapper = document.getElementById('layout-wrapper');
-    const btn = document.getElementById('sidebar-toggle');
-    const isHidden = wrapper.classList.toggle('sidebar-hidden');
+// --- Global State ---
+let dashboardData = null;       // Stores the raw data from server
+const chartInstances = new Map(); // DOM ID -> ECharts Instance
+const chartRegistry = new Map();  // DOM ID -> { metricPath: string, isDirty: boolean }
+const visibleChartIds = new Set(); // IDs of charts currently in viewport
 
-    btn.innerHTML = isHidden ?
-        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>` :
-        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+// --- 1. Intersection Observer (The Engine) ---
+// This watches which charts are on screen. 
+// It automatically triggers an update when you scroll to a dirty chart.
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        // We observe the wrapper div (card)
+        const wrapper = entry.target;
+        const id = wrapper.id;
 
-    if (!isHidden && window.splitInstance) {
-        window.splitInstance.setSizes(window.splitInstance.getSizes());
-    }
+        if (entry.isIntersecting) {
+            visibleChartIds.add(id);
+            // If the chart is outdated (dirty) or empty, render it now.
+            const config = chartRegistry.get(id);
+            if (config && config.isDirty) {
+                renderChart(id, config.metricPath);
+            } else {
+                // Just a resize check (in case sidebar moved)
+                const chart = chartInstances.get(id);
+                if (chart) chart.resize();
+            }
+        } else {
+            visibleChartIds.delete(id);
+        }
+    });
+}, { 
+    root: document.getElementById('charts-container'), // vital for correct scroll detection
+    rootMargin: '100px' // Pre-render charts 100px before they appear
+});
 
-    setTimeout(() => {
-        chartInstances.forEach(chart => chart.resize());
-    }, 310);
-}
-
+// --- 2. Data Handling (The "Lazy" Logic) ---
 
 function updateDashboard(evt) {
+    const req = evt.detail && evt.detail.xhr && evt.detail.xhr.responseURL;
+    if (!req || !req.includes('/data')) return;
     if (evt.detail.xhr.status !== 200) return;
-    const data = JSON.parse(evt.detail.xhr.responseText).data;
-    const container = document.getElementById('charts-container');
-    if (!container) return;
 
+    let json;
+    try { json = JSON.parse(evt.detail.xhr.responseText); } catch (e) { return; }
+    
+    // 1. Store Data Globally
+    dashboardData = json.data;
+    
+    // 2. Remove spinner
+    const container = document.getElementById('charts-container');
     const loader = container.querySelector('.loading-container');
     if (loader) loader.remove();
 
+    // 3. Extract Metrics
     const allMetrics = new Set();
-    Object.values(data).forEach(runData => {
+    Object.values(dashboardData).forEach(runData => {
         Object.keys(runData).forEach(key => {
             if (key !== 'step' && key !== 'index') allMetrics.add(key);
         });
     });
 
-    renderTree(container, Array.from(allMetrics), data);
+    // 4. Build DOM (Fast, does not touch ECharts)
+    renderTreeStructure(container, Array.from(allMetrics));
+
+    // 5. Mark ALL charts as dirty (needing update)
+    chartRegistry.forEach(config => config.isDirty = true);
+
+    // 6. Update ONLY the visible charts immediately
+    flushVisibleUpdates();
 }
 
-function renderTree(container, metrics, data) {
-    const rootFolder = getOrCreateFolder(container, "Charts", "root-level-charts", true);
-    const sortedMetrics = metrics.sort();
+function flushVisibleUpdates() {
+    visibleChartIds.forEach(id => {
+        const config = chartRegistry.get(id);
+        if (config && config.isDirty) {
+            renderChart(id, config.metricPath);
+        }
+    });
+}
 
-    sortedMetrics.forEach(path => {
+// --- 3. DOM Construction (Lightweight) ---
+
+function renderTreeStructure(container, metrics) {
+    const rootFolder = getOrCreateFolder(container, "Charts", "root-level-charts", true);
+    
+    metrics.sort().forEach(path => {
         const parts = path.split('/');
         const isTopLevel = parts.length === 1;
+        let currentParent = isTopLevel ? rootFolder : container;
+        let displayName = parts[0];
 
-        let currentParent;
-        let displayName;
-
-        if (isTopLevel) {
-            currentParent = rootFolder;
-            displayName = parts[0];
-        } else {
-            let folderParent = container;
+        if (!isTopLevel) {
             let currentPathPrefix = "folder";
             const maxDepth = Math.min(parts.length - 1, 3);
-
             for (let i = 0; i < maxDepth; i++) {
                 currentPathPrefix += "-" + parts[i].replace(/[^a-zA-Z0-9]/g, '');
-                folderParent = getOrCreateFolder(folderParent, parts[i], currentPathPrefix, false);
+                currentParent = getOrCreateFolder(currentParent, parts[i], currentPathPrefix, false);
             }
-            currentParent = folderParent;
             displayName = parts.slice(maxDepth).join('/');
         }
 
         const chartId = `chart-${path.replace(/[^a-zA-Z0-9]/g, '-')}`;
         const grid = getOrCreateGrid(currentParent);
-        const chartCanvas = getOrCreateChartElement(grid, displayName, path, chartId);
-        updateChartInstance(chartId, chartCanvas, path, data);
+        
+        // This creates the DIV but does NOT init ECharts yet
+        ensureChartContainer(grid, displayName, path, chartId);
+        
+        // Register the chart so we know what data it needs later
+        if (!chartRegistry.has(chartId)) {
+            chartRegistry.set(chartId, { metricPath: path, isDirty: true });
+        }
     });
 }
 
+function ensureChartContainer(grid, name, fullPath, chartId) {
+    if (document.getElementById(chartId)) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.id = chartId;
+    // CSS Optimization: 'contain: strict' tells browser this box is independent
+    // This massively speeds up layout when dragging the sidebar.
+    wrapper.className = 'card bg-card border shadow-sm h-72 w-full min-w-0';
+    wrapper.style.contain = "strict"; 
+    wrapper.innerHTML = `
+        <div class="card-body p-3 h-full flex flex-col">
+            <h4 class="text-[10px] font-bold uppercase tracking-wider opacity-40 truncate" title="${fullPath}">${name}</h4>
+            <div class="chart-canvas flex-1 w-full min-h-0"></div>
+        </div>
+    `;
+    grid.appendChild(wrapper);
+    observer.observe(wrapper); // Start watching visibility
+}
+
+// --- 4. Chart Rendering (The Heavy Lift) ---
+
+function getLogAxisState() {
+    return {
+        logX: document.getElementById('log-x-axis')?.checked,
+        logY: document.getElementById('log-y-axis')?.checked
+    };
+}
+
+function renderChart(chartId, metricPath) {
+    if (!dashboardData) return;
+
+    const wrapper = document.getElementById(chartId);
+    if (!wrapper) return;
+    const canvasDiv = wrapper.querySelector('.chart-canvas');
+
+    // Init ECharts only when actually needed
+    let myChart = chartInstances.get(chartId);
+    if (!myChart) {
+        myChart = echarts.init(canvasDiv, null, { renderer: 'canvas' });
+        chartInstances.set(chartId, myChart);
+    }
+
+    // Build Series
+    const series = [];
+    Object.entries(dashboardData).forEach(([runName, runMetrics]) => {
+        const plotData = runMetrics[metricPath];
+        if (plotData && plotData.length > 0) {
+            series.push({
+                name: runName,
+                type: 'line',
+                data: plotData,     
+                showSymbol: false,
+                sampling: 'lttb', // Essential for performance
+                large: true,      // Essential for performance
+                smooth: false,
+                animation: false, // Essential: Animation kills CPU on large datasets
+                lineStyle: { width: 1.5 }
+            });
+        }
+    });
+
+    const { logX, logY } = getLogAxisState();
+    
+    myChart.setOption({
+        animation: false,
+        tooltip: {
+            trigger: 'axis',
+            confine: true,
+            axisPointer: { type: 'line', snap: true, animation: false },
+            formatter: (params) => {
+                if(!params.length) return '';
+                let res = `<div class="text-[10px] font-bold mb-1">${params[0].axisValueLabel}</div>`;
+                params.forEach(item => {
+                    if (item.value?.[1] != null) {
+                        res += `<div class="flex items-center gap-2">${item.marker} <span class="opacity-70">${item.seriesName}:</span> <span class="font-mono">${item.value[1].toFixed(4)}</span></div>`;
+                    }
+                });
+                return `<div class="p-1">${res}</div>`;
+            }
+        },
+        grid: { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
+        xAxis: { type: logX ? 'log' : 'value', scale: true },
+        yAxis: { type: logY ? 'log' : 'value', scale: true, splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } } },
+        series: series,
+        legend: { bottom: 0, icon: 'circle', type: 'scroll', textStyle: { fontSize: 9 } }
+    }, { notMerge: true }); // notMerge=true ensures clean state
+
+    // Mark as clean
+    const config = chartRegistry.get(chartId);
+    if (config) config.isDirty = false;
+}
+
+// --- 5. UI Controls & Event Listeners ---
+
+// Optimized Toggle: Only updates visible charts
+function updateChartsAxisType() {
+    // 1. Mark ALL as dirty so they update when scrolled to
+    chartRegistry.forEach(c => c.isDirty = true);
+    // 2. Update visible ones immediately
+    flushVisibleUpdates();
+}
+
+// Optimized Resize: Debounce to prevent lag during drag
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        visibleChartIds.forEach(id => {
+            const chart = chartInstances.get(id);
+            if (chart) chart.resize();
+        });
+    }, 150);
+});
+
+function toggleSidebar() {
+    const wrapper = document.getElementById('layout-wrapper');
+    const isHidden = wrapper.classList.toggle('sidebar-hidden');
+    
+    // Update Toggle Icon
+    document.getElementById('sidebar-toggle').innerHTML = isHidden ? 
+        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>` :
+        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+
+    // If Split.js is active, tell it to recalc
+    if (!isHidden && window.splitInstance) {
+        window.splitInstance.setSizes(window.splitInstance.getSizes());
+    }
+
+    // Delay resize until transition ends (300ms)
+    setTimeout(() => {
+        visibleChartIds.forEach(id => {
+            const chart = chartInstances.get(id);
+            if (chart) chart.resize();
+        });
+    }, 320);
+}
+
+// --- Helpers ---
 function getOrCreateFolder(container, name, id, forceTop) {
     let folder = document.getElementById(id);
     if (!folder) {
         folder = document.createElement('div');
         folder.id = id;
-        folder.className = 'collapse collapse-arrow bg-base-100 border border-base-200 rounded-box w-full shrink-0';
-        folder.innerHTML = `
-            <input type="checkbox" checked /> 
-            <div class="collapse-title text-sm font-bold uppercase opacity-60">${name}</div>
-            <div class="collapse-content flex flex-col gap-4"></div>
-        `;
-        // Put "Charts" root folder at the very top, others at bottom
-        if (forceTop) container.prepend(folder);
-        else container.appendChild(folder);
+        folder.className = 'collapse collapse-arrow bg-base-100 border border-base-200 rounded-box w-full shrink-0 mb-2';
+        folder.innerHTML = `<input type="checkbox" checked /><div class="collapse-title text-sm font-bold uppercase opacity-60">${name}</div><div class="collapse-content flex flex-col gap-4"></div>`;
+        forceTop ? container.prepend(folder) : container.appendChild(folder);
     }
     return folder.querySelector('.collapse-content');
 }
@@ -98,112 +275,4 @@ function getOrCreateGrid(container) {
         container.prepend(grid);
     }
     return grid;
-}
-
-function checkIsSparse(values) {
-    if (!values || values.length === 0) return false;
-
-    const totalPoints = values.length;
-    const validPoints = values.filter(v => v !== null && v !== undefined).length;
-    const nullRatio = (totalPoints - validPoints) / totalPoints;
-
-    return nullRatio > 0.9;
-}
-
-
-function getOrCreateChartElement(grid, name, fullPath, chartId) {
-    let wrapper = document.getElementById(chartId);
-    if (!wrapper) {
-        wrapper = document.createElement('div');
-        wrapper.id = chartId;
-        wrapper.className = 'card bg-card border shadow-sm h-72 w-full min-w-0';
-        wrapper.innerHTML = `
-            <div class="card-body p-3 h-full flex flex-col">
-                <h4 class="text-[10px] font-bold uppercase tracking-wider opacity-40 truncate" title="${fullPath}">${name}</h4>
-                <div class="chart-canvas flex-1 w-full min-h-0"></div>
-            </div>
-        `;
-        grid.appendChild(wrapper);
-    }
-    return wrapper.querySelector('.chart-canvas');
-}
-
-function updateChartInstance(chartId, el, metricPath, data) {
-    let myChart = chartInstances.get(chartId);
-    if (!myChart) {
-        myChart = echarts.init(el);
-        chartInstances.set(chartId, myChart);
-        new ResizeObserver(() => myChart.resize()).observe(el);
-    }
-
-    const series = [];
-    Object.entries(data).forEach(([runName, metrics]) => {
-        const steps = metrics.step || metrics.index;
-        const values = metrics[metricPath];
-
-        if (steps && values) {
-            // 1. Filter out nulls so ECharts doesn't "snap" to empty data
-            const plotData = steps
-                .map((v, i) => [v, values[i]])
-                .filter(point => point[1] !== null && point[1] !== undefined);
-
-            // 2. Reuse the sparsity check on the original values 
-            // (or plotData if you prefer)
-            const isSparse = checkIsSparse(values);
-
-            series.push({
-                name: runName,
-                type: 'line',
-                data: plotData, // Clean data with no nulls
-                showSymbol: isSparse,
-                symbolSize: 6,
-                // Even though we filtered nulls, we use connectNulls 
-                // to draw lines between sparse points
-                connectNulls: true,
-                smooth: true,
-                lineStyle: { width: 1.5 }
-            });
-        }
-    });
-
-    myChart.setOption({
-        animation: false,
-        tooltip: {
-            trigger: 'axis',
-            confine: true,
-            // 3. Improve snapping behavior
-            axisPointer: {
-                type: 'line', // Vertical line
-                snap: true    // Snaps the line to the nearest data point
-            },
-            // 4. Custom formatter to only show series that actually have data at this step
-            formatter: function (params) {
-                let res = `<div class="text-[10px] font-bold mb-1">${params[0].axisValueLabel}</div>`;
-                params.forEach(item => {
-                    // Only show items that aren't null (extra safety)
-                    if (item.value[1] !== null && item.value[1] !== undefined) {
-                        res += `<div class="flex items-center gap-2">
-                            ${item.marker} 
-                            <span class="opacity-70">${item.seriesName}:</span> 
-                            <span class="font-mono">${item.value[1].toFixed(4)}</span>
-                        </div>`;
-                    }
-                });
-                return `<div class="p-1">${res}</div>`;
-            }
-        },
-        grid: { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
-        xAxis: {
-            type: 'value',
-            scale: true,
-            splitLine: { show: false }
-        },
-        yAxis: {
-            type: 'value',
-            scale: true,
-            splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } }
-        },
-        series: series,
-        legend: { bottom: 0, icon: 'circle', textStyle: { fontSize: 9 }, type: 'scroll' }
-    }, { notMerge: true });
 }

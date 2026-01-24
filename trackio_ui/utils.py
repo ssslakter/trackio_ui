@@ -116,11 +116,22 @@ def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, down
             continue
 
         df = df.copy()
-        na_mask = df.isna()
+
         if 0 < smoothing < 1.0:
+            na_mask = df.isna()
             df = df.ewm(alpha=1 - smoothing).mean()
             df[na_mask] = np.nan
-        df = apply_downsampling(df, downsample)
-        df = df.reset_index().round(6)
-        processed_data[run_name] = df.to_dict(orient="list")
+
+        if downsample > 1:
+            df = df.iloc[::downsample]
+
+        run_entry = {}
+        for col in df.columns:
+            clean_series = df[col].dropna().reset_index()
+
+            if not clean_series.empty:
+                run_entry[col] = clean_series.round(6).values.tolist()
+
+        processed_data[run_name] = run_entry
+
     return processed_data
