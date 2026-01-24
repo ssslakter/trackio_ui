@@ -1,4 +1,5 @@
-import json, orjson
+from importlib.resources import files
+import json, orjson, tempfile
 import click
 from fasthtml.common import *
 from monsterui.all import *
@@ -38,7 +39,10 @@ headers = [
 ]
 
 databases = {}
-app, rt = fast_app(hdrs=headers, static_path="static")
+app, rt = fast_app(hdrs=headers, 
+                   static_path=files("trackio_ui") / "static", 
+                   secret_key="secret", 
+                   key_fname=Path(tempfile.gettempdir()) / ".trackio_ui_sesskey")
 
 default_project = ""
 
