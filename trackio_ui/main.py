@@ -145,13 +145,12 @@ def project_dashboard(sess: dict, project_name: str):
 
     controls = SidebarSection(
         H3("Controls"),
-        LabelRange(label="Smoothing", name="smoothing", min="0", max="0.99", step="0.01", value=prefs.get("smoothing", "0.6"), cls="w-full space-y-2"),
+        LabelRange(label="Smoothing", name="smoothing", min="0", max="0.99", step="0.01", value=prefs.get("smoothing", "0.6"), cls="space-y-2"),
         LabelInput(
             label="Max Points",
             name="max_points",
             type="number",
             value=prefs.get("max_points", "100000"),
-            cls="w-full space-y-2",
         ),
         LabeledToggle("no cache", "refresh-checkbox", name="refresh", checked=prefs.get("refresh", False), cls_colors="checkbox-accent"),
         Div(
