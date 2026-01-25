@@ -37,8 +37,7 @@ function updateDashboard(evt) {
     const container = document.getElementById('charts-container');
     container.querySelector('.loading-container')?.remove();
 
-    const allMetrics = new Set(Object.values(dashboardData).flatMap(run => Object.keys(run).filter(k => k !== 'step' && k !== 'index')));
-
+    const allMetrics = new Set(Object.values(dashboardData).flatMap(run => Object.keys(run)));
     renderTreeStructure(container, Array.from(allMetrics));
     chartRegistry.forEach(config => config.isDirty = true);
     flushVisibleUpdates();
@@ -118,14 +117,41 @@ function renderChart(chartId, metricPath, targetCanvas, optionsOverrides = {}) {
     }
 
     const series = Object.entries(dashboardData).map(([runName, metrics]) => {
-        const plotData = metrics[metricPath];
-        return plotData?.length ? { name: runName, type: 'line', data: plotData, showSymbol: false, sampling: 'lttb', large: true, smooth: false, animation: false, lineStyle: { width: 1.5 } } : null;
+        const rawData = metrics[metricPath];
+
+        if (!rawData || !rawData.x || !rawData.x.length) return null;
+
+        const plotData = [];
+        const x = rawData.x;
+        const y = rawData.y;
+        const len = x.length;
+
+        for (let i = 0; i < len; i++) {
+            plotData.push([x[i], y[i]]);
+        }
+
+        return {
+            name: runName,
+            type: 'line',
+            data: plotData,
+            showSymbol: false,
+            sampling: 'lttb',
+            large: true,
+            smooth: false,
+            animation: false,
+            lineStyle: { width: 1.5 }
+        };
     }).filter(Boolean);
 
     const { logX, logY } = getLogAxisState();
     const baseOptions = {
         animation: false,
-        tooltip: { trigger: 'axis', confine: true, axisPointer: { type: 'line', snap: true, animation: false }, formatter: (p) => p.length ? `<div class="p-1"><div class="text-[10px] font-bold mb-1">${p[0].axisValueLabel}</div>${p.map(i => i.value?.[1] != null ? `<div class="flex items-center gap-2">${i.marker} <span class="opacity-70">${i.seriesName}:</span> <span class="font-mono">${i.value[1].toFixed(4)}</span></div>` : '').join('')}</div>` : '' },
+        tooltip: {
+            trigger: 'axis',
+            confine: true,
+            axisPointer: { type: 'line', snap: true, animation: false },
+            formatter: (p) => p.length ? `<div class="p-1"><div class="text-[10px] font-bold mb-1">${p[0].axisValueLabel}</div>${p.map(i => i.value?.[1] != null ? `<div class="flex items-center gap-2">${i.marker} <span class="opacity-70">${i.seriesName}:</span> <span class="font-mono">${i.value[1].toFixed(4)}</span></div>` : '').join('')}</div>` : ''
+        },
         grid: { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
         xAxis: { type: logX ? 'log' : 'value', scale: true },
         yAxis: { type: logY ? 'log' : 'value', scale: true, splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } } },

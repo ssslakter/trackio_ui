@@ -115,34 +115,54 @@ def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_
         if df.empty:
             continue
 
-        df = df.copy()
-
         if 0 < smoothing < 1.0:
             na_mask = df.isna()
             df = df.ewm(alpha=1 - smoothing).mean()
             df[na_mask] = np.nan
 
+        idx_np = df.index.to_numpy()
         run_entry = {}
         for col in df.columns:
-            clean_series = df[col].dropna()
-            if max_points is not None:
-                clean_series = min_max_downsample(clean_series, int(max_points))
+            vals = df[col].to_numpy()
+            
+            mask = ~np.isnan(vals)
+            x = idx_np[mask]
+            y = vals[mask]
+            if max_points is not None and len(x) > max_points:
+                x, y = min_max_downsample(x, y, int(max_points))
 
-            run_entry[col] = list(clean_series.round(6).items())
+            y = np.round(y, 6)
+
+            run_entry[col] = {
+                "x": x,
+                "y": y
+            }
 
         processed_data[run_name] = run_entry
 
     return processed_data
 
 
-def min_max_downsample(series, target_points):
-    if len(series) <= target_points:
-        return series
+def min_max_downsample(x, y, target_points):
+    n = len(y)
+    if n <= target_points:
+        return x, y
 
     num_chunks = target_points // 2
+    chunk_size = n // num_chunks
+    limit = num_chunks * chunk_size
 
-    groups = np.linspace(0, num_chunks, len(series), endpoint=False).astype(int)
+    y_reshaped = y[:limit].reshape(num_chunks, chunk_size)
+    
+    arg_mins = np.argmin(y_reshaped, axis=1)
+    arg_maxs = np.argmax(y_reshaped, axis=1)
 
-    indices = series.groupby(groups).agg(["idxmin", "idxmax"]).stack().unique()
+    chunk_offsets = np.arange(0, limit, chunk_size)
+    idx_mins = arg_mins + chunk_offsets
+    idx_maxs = arg_maxs + chunk_offsets
 
-    return series.loc[np.sort(indices)]
+    final_indices = np.concatenate([idx_mins, idx_maxs, [n - 1]])
+    
+    final_indices.sort()
+    
+    return x[final_indices], y[final_indices]
