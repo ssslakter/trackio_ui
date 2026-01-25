@@ -40,7 +40,7 @@ def RunsListComponent(runs, prefs):
     return Div(
         *[RunEntry(r, r in selected_runs) for r in (runs or [])],
         id="runs-list-container",
-        cls="flex-1 overflow-y-auto p-4 space-y-1 min-h-0", 
+        cls="flex-1 overflow-y-auto p-4 space-y-1 min-h-0",
     )
 
 
@@ -140,13 +140,19 @@ def project_dashboard(sess: dict, project_name: str):
         H3(project_name, cls="font-bold text-lg text-primary truncate"),
         P("Trainer Tools", cls="text-xs text-muted-foreground"),
         Details(Summary("change theme"), ThemePicker()),
-        cls="justify-center shrink-0", 
+        cls="justify-center shrink-0",
     )
 
     controls = SidebarSection(
         H3("Controls"),
-        LabelRange(label="Smoothing", name="smoothing", min="0", max="0.99", step="0.01", value=prefs.get("smoothing", "0.6"), cls="w-full"),
-        LabelRange(label="Downsample", name="downsample", min="1", max="100", step="1", value=prefs.get("downsample", "1"), cls="w-full"),
+        LabelRange(label="Smoothing", name="smoothing", min="0", max="0.99", step="0.01", value=prefs.get("smoothing", "0.6"), cls="w-full space-y-2"),
+        LabelInput(
+            label="Max Points",
+            name="max_points",
+            type="number",
+            value=prefs.get("max_points", "100000"),
+            cls="w-full space-y-2",
+        ),
         LabeledToggle("no cache", "refresh-checkbox", name="refresh", checked=prefs.get("refresh", False), cls_colors="checkbox-accent"),
         Div(
             LabeledToggle("log-x axis", "log-x-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
@@ -174,12 +180,7 @@ def project_dashboard(sess: dict, project_name: str):
     sidebar = Div(
         sidebar_header,
         Form(
-            Div(
-                Div(controls, cls="shrink-0"),
-                RunsListComponent(runs, prefs), 
-                sidebar_footer, 
-                cls="flex flex-col flex-1 min-h-0" 
-            ),
+            Div(Div(controls, cls="shrink-0"), RunsListComponent(runs, prefs), sidebar_footer, cls="flex flex-col flex-1 min-h-0"),
             cls="flex flex-col flex-1 min-h-0",
             hx_get=get_data.to(project_name=project_name),
             hx_trigger="change delay:500ms, load, submit",
@@ -211,14 +212,14 @@ def project_dashboard(sess: dict, project_name: str):
 
 
 @rt("/{project_name}/data")
-def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, downsample: int = 1, refresh: bool = False):
-    sess[f"prefs_{project_name}"] = {"selected_runs": runs or [], "smoothing": str(smoothing), "downsample": str(downsample), "refresh": bool(refresh)}
+def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, max_points: Optional[int] = None, refresh: bool = False):
+    sess[f"prefs_{project_name}"] = {"selected_runs": runs or [], "smoothing": str(smoothing), "max_points": str(max_points), "refresh": bool(refresh)}
     if not runs:
         return json.dumps({"data": {}})
 
     db = get_db(project_name)
     raw_data = db.get_metrics(runs, refresh=bool(refresh))
-    resp = orjson.dumps({"data": prepare_metrics(raw_data, smoothing, downsample)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS)
+    resp = orjson.dumps({"data": prepare_metrics(raw_data, smoothing, max_points)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS)
     return Response(content=resp, media_type="application/json")
 
 

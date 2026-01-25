@@ -109,7 +109,7 @@ def apply_downsampling(df: pd.DataFrame, stride: int) -> pd.DataFrame:
     return df[stride_mask]
 
 
-def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, downsample: int = 1):
+def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_points: Optional[int] = None):
     processed_data = {}
     for run_name, df in metrics.items():
         if df.empty:
@@ -122,16 +122,27 @@ def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, down
             df = df.ewm(alpha=1 - smoothing).mean()
             df[na_mask] = np.nan
 
-        if downsample > 1:
-            df = df.iloc[::downsample]
-
         run_entry = {}
         for col in df.columns:
-            clean_series = df[col].dropna().reset_index()
+            clean_series = df[col].dropna()
+            if max_points is not None:
+                clean_series = min_max_downsample(clean_series, int(max_points))
 
-            if not clean_series.empty:
-                run_entry[col] = clean_series.round(6).values.tolist()
+            run_entry[col] = list(clean_series.round(6).items())
 
         processed_data[run_name] = run_entry
 
     return processed_data
+
+
+def min_max_downsample(series, target_points):
+    if len(series) <= target_points:
+        return series
+
+    num_chunks = target_points // 2
+
+    groups = np.linspace(0, num_chunks, len(series), endpoint=False).astype(int)
+
+    indices = series.groupby(groups).agg(["idxmin", "idxmax"]).stack().unique()
+
+    return series.loc[np.sort(indices)]
