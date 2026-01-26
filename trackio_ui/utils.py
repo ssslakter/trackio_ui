@@ -19,10 +19,22 @@ class TrackioDatabase:
 
     def get_runs(self, names_only: bool = True) -> Union[list[dict], list[str]]:
         """Returns a list of all runs in the project. Each run contains keys ['id', 'run_name', 'config', 'created_at']."""
-        runs = self.db.t.configs()
+        runs: list[dict] = self.db.t.configs()
+        runs = sorted(runs, key=lambda x: x["created_at"], reverse=True)
         if names_only:
-            return [r["run_name"] for r in sorted(runs, key=lambda x: x["created_at"])]
+            return [r["run_name"] for r in runs]
+        for r in runs:
+            r.update(orjson.loads(r.pop("config")))
         return runs
+
+    def delete_runs(self, run_names: list[str]):
+        """Deletes runs and their associated metrics."""
+        if not run_names:
+            return
+        qry = f'run_name in ({",".join(["?"] * len(run_names))})'
+        for t in ["configs", "metrics"]:
+            getattr(self.db.t, t).delete_where(qry, run_names)
+        self.clear_cache()
 
     def get_metrics_raw(self, run_names: list[str]) -> list[dict]:
         """Returns metrics for the specified run names."""
@@ -124,19 +136,16 @@ def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_
         run_entry = {}
         for col in df.columns:
             vals = df[col].to_numpy()
-            
+
             mask = ~np.isnan(vals)
             x = idx_np[mask]
             y = vals[mask]
-            if max_points!=0 and len(x) > max_points:
+            if max_points != 0 and len(x) > max_points:
                 x, y = min_max_downsample(x, y, int(max_points))
 
             y = np.round(y, 6)
 
-            run_entry[col] = {
-                "x": x,
-                "y": y
-            }
+            run_entry[col] = {"x": x, "y": y}
 
         processed_data[run_name] = run_entry
 
@@ -153,7 +162,7 @@ def min_max_downsample(x, y, target_points):
     limit = num_chunks * chunk_size
 
     y_reshaped = y[:limit].reshape(num_chunks, chunk_size)
-    
+
     arg_mins = np.argmin(y_reshaped, axis=1)
     arg_maxs = np.argmax(y_reshaped, axis=1)
 
@@ -162,7 +171,7 @@ def min_max_downsample(x, y, target_points):
     idx_maxs = arg_maxs + chunk_offsets
 
     final_indices = np.concatenate([idx_mins, idx_maxs, [n - 1]])
-    
+
     final_indices.sort()
-    
+
     return x[final_indices], y[final_indices]
