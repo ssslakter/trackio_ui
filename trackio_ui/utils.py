@@ -109,7 +109,7 @@ def apply_downsampling(df: pd.DataFrame, stride: int) -> pd.DataFrame:
     return df[stride_mask]
 
 
-def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_points: Optional[int] = None):
+def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_points: int = 0):
     processed_data = {}
     for run_name, df in metrics.items():
         if df.empty:
@@ -128,7 +128,7 @@ def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_
             mask = ~np.isnan(vals)
             x = idx_np[mask]
             y = vals[mask]
-            if max_points is not None and len(x) > max_points:
+            if max_points!=0 and len(x) > max_points:
                 x, y = min_max_downsample(x, y, int(max_points))
 
             y = np.round(y, 6)

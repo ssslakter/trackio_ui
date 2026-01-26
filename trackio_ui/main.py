@@ -211,7 +211,7 @@ def project_dashboard(sess: dict, project_name: str):
 
 
 @rt("/{project_name}/data")
-def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, max_points: Optional[int] = None, refresh: bool = False):
+def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, max_points: int = 0, refresh: bool = False):
     sess[f"prefs_{project_name}"] = {"selected_runs": runs or [], "smoothing": str(smoothing), "max_points": str(max_points), "refresh": bool(refresh)}
     if not runs:
         return json.dumps({"data": {}})
