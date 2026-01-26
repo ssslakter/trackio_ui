@@ -1,19 +1,19 @@
 # trackio_ui
-Simple UI for trackio dashboard, written in FastHTML. Main reason for creating this was bad performance of gradio frontend to trackio. 
+
+A simple UI for the trackio dashboard, written in **FastHTML**. The primary reason for creating this was the poor performance of the Gradio frontend for trackio.
 
 <img src="images/image.png" width="700">
 
-
-With this ui you can configure the max number of points for graphs to prevent slow communication and rendering.
+With this UI, you can configure the maximum number of data points for graphs to prevent slow communication and rendering.
 
 ## Installation
 ```sh
-pip install "trackio_ui @ https://github.com/ssslakter/trackio_ui.git"
+pip install "trackio_ui @ git+https://github.com/ssslakter/trackio_ui.git"
 ```
 
-## Getting started
-To run the local server of trackio-ui you can run the following command.
+## Getting Started
+To start the local trackio-ui server, run the following command:
 ```sh
 trackio-ui --project "trackio-project" --port 8080
 ```
- Note that project name should match your trackio project. It will look for the project `.db` file in the `~/.cache/huggingface/trackio`.
+**Note:** The project name must match your trackio project name. The application will look for the project `.db` file in `~/.cache/huggingface/trackio`.
