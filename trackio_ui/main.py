@@ -316,7 +316,7 @@ def project_dashboard(sess: dict, project_name: str):
         sidebar,
         main_content,
         split_init,
-        cls="flex flex-row w-full overflow-hidden text-foreground",
+        cls="flex flex-1 flex-row w-full overflow-hidden text-foreground",
         id="layout-wrapper",
     )
 
