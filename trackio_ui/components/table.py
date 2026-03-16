@@ -1,10 +1,10 @@
 import json
+from datetime import datetime
 from fasthtml.common import *
 from monsterui.all import *
 
 
 def _normalize_run(run: dict) -> dict:
-    print(run)
     run["Created"] = run.pop("_Created")
     run["Select"] = run["run_name"]
     del run["created_at"]
@@ -35,12 +35,17 @@ def _header_cell(col: str) -> FT:
 
 
 def _body_cell(col: str, val) -> FT:
-    if col != "Select":
-        return Td(str(val) if val is not None else "-", cls="whitespace-nowrap max-w-xs truncate")
-    return Td(
+    if col == "Select":
+        return Td(
         CheckboxX(name="selected_runs", value=val, **{"x-model": "selected"}, cls="row-checkbox"),
         shrink=True,
     )
+    elif col == "Created":
+        dt_obj = datetime.fromisoformat(val)
+        formatted = dt_obj.strftime("%B %d, %Y at %I:%M %p")
+        return Td(formatted, cls="whitespace-nowrap")
+    return Td(str(val) if val is not None else "-", cls="whitespace-nowrap max-w-xs truncate")
+    
 
 
 def RunsTable(project_name: str, runs: list[dict], id: str = "runs_table"):
