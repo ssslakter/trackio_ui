@@ -11,13 +11,23 @@ from .components import *
 # --- App Setup ---
 
 headers = [
+    Script("""
+  (function() {
+    const w = localStorage.getItem('sidebarWidth');
+    if (w) document.documentElement.style.setProperty('--sidebar-width', w);
+  })();
+    """),
+    ResizeScript(),
     Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
     Script(src="/static/dashboard.js"),
-    Script(src="https://unpkg.com/split.js/dist/split.min.js"),
     Script(src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.x.x/dist/cdn.min.js", defer=True),
     Script(src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js", defer=True),
     Style("""
     [x-cloak] { display: none !important; }
+    """),
+    Style("""
+  #sidebar { width: var(--sidebar-width, 280px); }
+  #layout-wrapper { --sidebar-width: 280px; }
     """),
     Theme.blue.headers(),
 ]
@@ -156,6 +166,7 @@ def project_dashboard(sess: dict, project_name: str):
         sidebar_footer,
         id="sidebar",
         cls="h-full bg-card border-r flex flex-col shrink-0",
+        style="width: var(--sidebar-width)",
     )
 
     main_content = Main(
@@ -167,16 +178,13 @@ def project_dashboard(sess: dict, project_name: str):
         cls="relative flex-1 min-w-0 overflow-y-auto p-6 pr-8 bg-muted/10",
     )
 
-    split_init = Script(
-        "window.splitInstance = Split(['#sidebar', '#main-content'], {sizes: [20, 80], minSize: [250, 400], gutterSize: 8, cursor: 'col-resize', onDragEnd: function() { if(window.chartInstances) window.chartInstances.forEach(c => c.resize()); }});"
-    )
-
     layout = Div(
         sidebar,
+        ResizeHandle(),
         main_content,
-        split_init,
         cls="flex flex-1 min-h-0",
         id="layout-wrapper",
+        style="--sidebar-width: 300px;",
     )
 
     return (
