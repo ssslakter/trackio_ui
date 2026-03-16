@@ -51,8 +51,8 @@ def index():
 
 @rt("/{project_name}/runs")
 def get_runs_component(sess, project_name: str):
-    db, prefs = get_db(project_name), sess.get(f"prefs_{project_name}", {})
-    return RunsListComponent(db.get_runs(), prefs)
+    db = get_db(project_name)
+    return RunsListComponent(db.get_runs())
 
 
 @rt("/{project_name}/table")
@@ -92,7 +92,7 @@ def delete_runs_endpoint(project_name: str, selected_runs: list[str] | None = No
 def project_dashboard(sess: dict, project_name: str):
     db = get_db(project_name)
     runs = db.get_runs()
-    prefs = sess.get(f"prefs_{project_name}", {})
+    # prefs = sess.get(f"prefs_{project_name}", {})
 
     # Sidebar Construction
     sidebar_header = SidebarSection(
@@ -111,32 +111,25 @@ def project_dashboard(sess: dict, project_name: str):
             min="0",
             max="0.99",
             step="0.01",
-            value=prefs.get("smoothing", "0.6"),
+            x_data=f"{{val: parseFloat(localStorage.getItem('smoothing') ?? '0.5')}}",
+            x_init="$el.setAttribute('value', val)",
+            **{"@uk-input-range:input.window": "localStorage.setItem('smoothing', $event.detail.value)"},
             cls="space-y-2",
         ),
         LabelInput(
             label="Max Points",
             name="max_points",
             type="number",
-            value=prefs.get("max_points", "100000"),
-        ),
-        LabeledToggle(
-            "no cache",
-            "refresh-checkbox",
-            name="refresh",
-            checked=prefs.get("refresh", False),
-            cls_colors="checkbox-accent",
+            x_data="{val: $persist('100000').as('max_points')}",
+            x_model="val",
         ),
         Div(
-            LabeledToggle("log-x axis", "log-x-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
-            LabeledToggle("log-y axis", "log-y-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
+            LabeledCheckbox("log-x axis", "log-x-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
+            LabeledCheckbox("log-y axis", "log-y-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
             cls="flex flex-row flex-wrap gap-4 py-2",
         ),
-        LabeledToggle(
-            "Select All Runs",
-            "select-all",
-            onclick="let c = this.checked; document.querySelectorAll('input[name=runs]').forEach(el => el.checked = c); htmx.trigger(this.closest('form'), 'change')",
-        ),
+        RunsListComponent(runs),
+        cls="flex flex-col flex-1 min-h-0",
     )
 
     sidebar_footer = Div(
@@ -150,39 +143,28 @@ def project_dashboard(sess: dict, project_name: str):
         cls="shrink-0 p-4 border-t",
     )
 
-    sidebar = Div(
+    sidebar = Aside(
         sidebar_header,
         Form(
-            Div(
-                Div(controls, cls="shrink-0"),
-                RunsListComponent(runs, prefs),
-                sidebar_footer,
-                cls="flex flex-col flex-1 min-h-0",
-            ),
-            cls="flex flex-col flex-1 min-h-0",
+            controls,
+            cls="flex flex-col flex-1 min-h-0 overflow-y-auto",
             hx_get=get_data.to(project_name=project_name),
             hx_trigger="change delay:500ms, load, submit",
             hx_swap="none",
             hx_on_htmx_after_request="updateDashboard(event)",
         ),
+        sidebar_footer,
         id="sidebar",
-        cls="h-full bg-card border-r flex flex-col sidebar-transition shrink-0 overflow-hidden",
+        cls="h-full bg-card border-r flex flex-col shrink-0",
     )
 
-    main_content = Div(
+    main_content = Main(
         Div(
-            Div(
-                Div(
-                    H3("Loading metrics...", cls="loading loading-dots loading-lg text-primary"),
-                    cls="m-auto loading-container",
-                ),
-                id="charts-container",
-                cls="p-6 pr-8 bg-muted/10 flex flex-col w-full",
-            ),
-            cls="flex-1 h-full w-full overflow-y-auto transform-gpu",
+            H3("Loading metrics...", cls="loading loading-dots loading-lg text-primary"),
+            cls="m-auto loading-container",
         ),
         id="main-content",
-        cls="relative flex-1 sidebar-transition min-w-0",
+        cls="relative flex-1 min-w-0 overflow-y-auto p-6 pr-8 bg-muted/10",
     )
 
     split_init = Script(
@@ -193,11 +175,18 @@ def project_dashboard(sess: dict, project_name: str):
         sidebar,
         main_content,
         split_init,
-        cls="flex flex-1 flex-row w-full overflow-hidden text-foreground",
+        cls="flex flex-1 min-h-0",
         id="layout-wrapper",
     )
 
-    return Title(f"trackio-ui {project_name}"), Div(ProjectHeader(project_name, "dashboard"), layout, cls="flex flex-col h-screen w-full")
+    return (
+        Title(f"trackio-ui {project_name}"),
+        Div(
+            ProjectHeader(project_name, "dashboard"),
+            layout,
+            cls="flex flex-col h-screen overflow-hidden",
+        ),
+    )
 
 
 @rt("/{project_name}/data")
