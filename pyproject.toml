@@ -33,5 +33,5 @@ trackio_ui = { path = ".", editable = true }
 
 [tool.pixi.tasks]
 
-[tool.black]
+[tool.ruff]
 line-length = 160

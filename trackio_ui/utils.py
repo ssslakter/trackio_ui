@@ -8,8 +8,8 @@ from fastlite import *
 class TrackioDatabase:
     def __init__(self, project_name: str, trackio_root: Optional[str] = None):
         self.project_name = project_name
-        trackio_root = trackio_root or Path("~/.cache/huggingface/trackio")
-        self.db_path = Path(trackio_root / f"{project_name}.db").expanduser()
+        root = Path(trackio_root or "~/.cache/huggingface/trackio")
+        self.db_path = Path(root / f"{project_name}.db").expanduser()
         self.db = database(self.db_path)
         self._cache = {}
 
@@ -31,7 +31,7 @@ class TrackioDatabase:
         """Deletes runs and their associated metrics."""
         if not run_names:
             return
-        qry = f'run_name in ({",".join(["?"] * len(run_names))})'
+        qry = f"run_name in ({','.join(['?'] * len(run_names))})"
         for t in ["configs", "metrics"]:
             getattr(self.db.t, t).delete_where(qry, run_names)
         self.clear_cache()
@@ -40,9 +40,9 @@ class TrackioDatabase:
         """Returns metrics for the specified run names."""
         if not run_names:
             return []
-        return self.db.t.metrics(f"run_name in ({','.join(['?']*len(run_names))})", run_names)
+        return self.db.t.metrics(f"run_name in ({','.join(['?'] * len(run_names))})", run_names)
 
-    def get_metrics(self, run_names: Union[list[str], str, None] = None, refresh: bool = False) -> pd.DataFrame:
+    def get_metrics(self, run_names: Union[list[str], str, None] = None, refresh: bool = False) -> dict:
         """
         Returns a DataFrame of metrics.
         Checks cache first, only fetches missing runs from DB.

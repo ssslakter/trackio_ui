@@ -12,7 +12,11 @@ def ProjectHeader(project_name, active_tab="dashboard"):
 
     def Tab(name, href, active):
         cls = "border-b-2 px-4 py-2 text-sm font-medium transition-colors "
-        cls += "border-primary text-primary" if active else "border-transparent text-muted-foreground hover:text-foreground"
+        cls += (
+            "border-primary text-primary"
+            if active
+            else "border-transparent text-muted-foreground hover:text-foreground"
+        )
         return A(name, href=href, cls=cls)
 
     return Div(
@@ -26,7 +30,7 @@ def ProjectHeader(project_name, active_tab="dashboard"):
     )
 
 
-def RunsTable(runs, id='runs_table'):
+def RunsTable(runs, id="runs_table"):
     """Renders the MonsterUI table with dynamic columns."""
     if not runs:
         return Div("No runs found.", cls="p-10 text-center text-muted-foreground")
@@ -65,7 +69,14 @@ def RunsTable(runs, id='runs_table'):
 def LabeledToggle(label, id, name=None, checked=False, onchange=None, onclick=None, cls_colors="checkbox-primary"):
     """Generic component for a checkbox with a label."""
     return Div(
-        CheckboxX(id=id, name=name or id, checked=checked, onchange=onchange, onclick=onclick, cls=f"checkbox checkbox-sm {cls_colors} mr-2"),
+        CheckboxX(
+            id=id,
+            name=name or id,
+            checked=checked,
+            onchange=onchange,
+            onclick=onclick,
+            cls=f"checkbox checkbox-sm {cls_colors} mr-2",
+        ),
         Label(label, cls="font-semibold text-sm cursor-pointer", htmlFor=id),
         cls="flex items-center",
     )
@@ -192,7 +203,7 @@ def runs_table_view(project_name: str):
 
     actions_bar = Div(
         Button(
-            Div(UkIcon(icon="trash-2", cls="mr-2"), "Delete Selected", cls='flex items-center'),
+            Div(UkIcon(icon="trash-2", cls="mr-2"), "Delete Selected", cls="flex items-center"),
             cls=ButtonT.destructive,
             hx_post=f"/{project_name}/delete_runs",
             hx_confirm="Are you sure you want to delete the selected runs?",
@@ -225,7 +236,7 @@ def runs_table_view(project_name: str):
 
 
 @rt("/{project_name}/delete_runs")
-def delete_runs_endpoint(project_name: str, selected_runs: list[str] = None):
+def delete_runs_endpoint(project_name: str, selected_runs: list[str] | None = None):
     if selected_runs:
         db = get_db(project_name)
         db.delete_runs(selected_runs)
@@ -250,17 +261,35 @@ def project_dashboard(sess: dict, project_name: str):
 
     controls = SidebarSection(
         H3("Controls"),
-        LabelRange(label="Smoothing", name="smoothing", min="0", max="0.99", step="0.01", value=prefs.get("smoothing", "0.6"), cls="space-y-2"),
+        LabelRange(
+            label="Smoothing",
+            name="smoothing",
+            min="0",
+            max="0.99",
+            step="0.01",
+            value=prefs.get("smoothing", "0.6"),
+            cls="space-y-2",
+        ),
         LabelInput(
             label="Max Points",
             name="max_points",
             type="number",
             value=prefs.get("max_points", "100000"),
         ),
-        LabeledToggle("no cache", "refresh-checkbox", name="refresh", checked=prefs.get("refresh", False), cls_colors="checkbox-accent"),
+        LabeledToggle(
+            "no cache",
+            "refresh-checkbox",
+            name="refresh",
+            checked=prefs.get("refresh", False),
+            cls_colors="checkbox-accent",
+        ),
         Div(
-            LabeledToggle("log-x axis", "log-x-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
-            LabeledToggle("log-y axis", "log-y-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
+            LabeledToggle(
+                "log-x axis", "log-x-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"
+            ),
+            LabeledToggle(
+                "log-y axis", "log-y-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"
+            ),
             cls="flex flex-row flex-wrap gap-4 py-2",
         ),
         LabeledToggle(
@@ -284,7 +313,12 @@ def project_dashboard(sess: dict, project_name: str):
     sidebar = Div(
         sidebar_header,
         Form(
-            Div(Div(controls, cls="shrink-0"), RunsListComponent(runs, prefs), sidebar_footer, cls="flex flex-col flex-1 min-h-0"),
+            Div(
+                Div(controls, cls="shrink-0"),
+                RunsListComponent(runs, prefs),
+                sidebar_footer,
+                cls="flex flex-col flex-1 min-h-0",
+            ),
             cls="flex flex-col flex-1 min-h-0",
             hx_get=get_data.to(project_name=project_name),
             hx_trigger="change delay:500ms, load, submit",
@@ -296,14 +330,22 @@ def project_dashboard(sess: dict, project_name: str):
     )
 
     main_content = Div(
-        Button(id="sidebar-toggle", cls="btn btn-circle btn-sm btn-secondary shadow-lg fixed bottom-6 left-6 z-[100]", onclick="toggleSidebar()"),
+        Button(
+            id="sidebar-toggle",
+            cls="btn btn-circle btn-sm btn-secondary shadow-lg fixed bottom-6 left-6 z-[100]",
+            onclick="toggleSidebar()",
+        ),
         Div(
             Div(
-            Div(H3("Loading metrics...", cls="loading loading-dots loading-lg text-primary"), cls="m-auto loading-container"),
-            id="charts-container",
-            cls="p-6 pr-8 bg-muted/10 flex flex-col w-full",
+                Div(
+                    H3("Loading metrics...", cls="loading loading-dots loading-lg text-primary"),
+                    cls="m-auto loading-container",
+                ),
+                id="charts-container",
+                cls="p-6 pr-8 bg-muted/10 flex flex-col w-full",
+            ),
+            cls="flex-1 h-full w-full overflow-y-auto transform-gpu",
         ),
-        cls="flex-1 h-full w-full overflow-y-auto transform-gpu"),
         id="main-content",
         cls="relative flex-1 sidebar-transition min-w-0",
     )
@@ -320,18 +362,35 @@ def project_dashboard(sess: dict, project_name: str):
         id="layout-wrapper",
     )
 
-    return Title(f"{project_name}"), Div(ProjectHeader(project_name, "dashboard"), layout, cls="flex flex-col h-screen w-full")
+    return Title(f"{project_name}"), Div(
+        ProjectHeader(project_name, "dashboard"), layout, cls="flex flex-col h-screen w-full"
+    )
 
 
 @rt("/{project_name}/data")
-def get_data(sess, project_name: str, runs: list[str] = None, smoothing: float = 0.0, max_points: int = 0, refresh: bool = False):
-    sess[f"prefs_{project_name}"] = {"selected_runs": runs or [], "smoothing": str(smoothing), "max_points": str(max_points), "refresh": bool(refresh)}
+def get_data(
+    sess,
+    project_name: str,
+    runs: list[str] | None = None,
+    smoothing: float = 0.0,
+    max_points: int = 0,
+    refresh: bool = False,
+):
+    sess[f"prefs_{project_name}"] = {
+        "selected_runs": runs or [],
+        "smoothing": str(smoothing),
+        "max_points": str(max_points),
+        "refresh": bool(refresh),
+    }
     if not runs:
         return json.dumps({"data": {}})
 
     db = get_db(project_name)
     raw_data = db.get_metrics(runs, refresh=bool(refresh))
-    resp = orjson.dumps({"data": prepare_metrics(raw_data, smoothing, max_points)}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS)
+    resp = orjson.dumps(
+        {"data": prepare_metrics(raw_data, smoothing, max_points)},
+        option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS,
+    )
     return Response(content=resp, media_type="application/json")
 
 
