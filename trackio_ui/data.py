@@ -42,9 +42,9 @@ class TrackioDatabase:
             return []
         return self.db.t.metrics(f"run_name in ({','.join(['?'] * len(run_names))})", run_names)
 
-    def get_metrics(self, run_names: Union[list[str], str, None] = None, refresh: bool = False) -> dict:
+    def get_metrics(self, run_names: Union[list[str], str, None] = None, refresh: bool = True) -> dict:
         """
-        Returns a DataFrame of metrics.
+        Returns a dict of metrics.
         Checks cache first, only fetches missing runs from DB.
 
         :param refresh: If True, ignores cache and re-fetches specified runs from DB.
@@ -64,6 +64,14 @@ class TrackioDatabase:
                 self._cache.update(new_dfs)
 
         return {k: self._cache[k] for k in run_names}
+
+    def get_metrics_schema(self, run_names: Union[list[str], str, None] = None) -> list[str]:
+        """Returns a list of all metric paths for the specified runs."""
+        metrics = self.get_metrics(run_names)
+        if not metrics:
+            return []
+        first_df = next(iter(metrics.values()))
+        return first_df.columns.tolist()
 
 
 def process_metrics_to_dict(raw_metrics) -> dict[str, pd.DataFrame]:

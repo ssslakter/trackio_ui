@@ -4,7 +4,7 @@ import json, orjson, tempfile, click
 from pathlib import Path
 from fasthtml.common import *
 from monsterui.all import *
-from .utils import TrackioDatabase, prepare_metrics
+from .data import TrackioDatabase, prepare_metrics
 from .components import *
 
 
@@ -42,7 +42,7 @@ app, rt = fast_app(
     bodykw={"hx-boost": "true"},
 )
 
-default_project = ""
+default_project = os.getenv("TRACKIO_DEFAULT_PROJECT", "")
 
 
 def get_db(project_name) -> TrackioDatabase:
@@ -56,13 +56,14 @@ def get_db(project_name) -> TrackioDatabase:
 
 @rt("/")
 def index():
+    print("Default project:", default_project)
     return Redirect(f"/{default_project or 'default_project'}")
 
 
 @rt("/{project_name}/runs")
-def get_runs_component(sess, project_name: str):
-    db = get_db(project_name)
-    return RunsListComponent(db.get_runs())
+def get_runs(sess, project_name: str):
+    runs = get_db(project_name).get_runs()
+    return RunsListComponent(runs)
 
 
 @rt("/{project_name}/table")
@@ -99,10 +100,10 @@ def delete_runs_endpoint(project_name: str, selected_runs: list[str] | None = No
 
 
 @rt("/{project_name}")
-def project_dashboard(sess: dict, project_name: str):
+def project_dashboard(project_name: str, selected_runs: str | None = None):
     db = get_db(project_name)
     runs = db.get_runs()
-    # prefs = sess.get(f"prefs_{project_name}", {})
+    selected_runs = selected_runs.split(",") if selected_runs else []
 
     # Sidebar Construction
     sidebar_header = SidebarSection(
@@ -138,16 +139,15 @@ def project_dashboard(sess: dict, project_name: str):
             LabeledCheckbox("log-y axis", "log-y-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
             cls="flex flex-row flex-wrap gap-4 py-2",
         ),
-        RunsListComponent(runs),
+        (runs_list := RunsListComponent(runs)),
         cls="flex flex-col flex-1 min-h-0",
     )
-
     sidebar_footer = Div(
         Button(
             "Refresh",
             cls=(ButtonT.primary, "w-full", "mt-2"),
-            hx_get=get_runs_component.to(project_name=project_name),
-            hx_target="#runs-list-container",
+            hx_get=get_runs.to(project_name=project_name),
+            hx_target=f"#{runs_list.id}",
             hx_swap="outerHTML",
         ),
         cls="shrink-0 p-4 border-t",
@@ -158,10 +158,10 @@ def project_dashboard(sess: dict, project_name: str):
         Form(
             controls,
             cls="flex flex-col flex-1 min-h-0 overflow-y-auto",
-            hx_get=get_data.to(project_name=project_name),
-            hx_trigger="change delay:500ms, load, submit",
-            hx_swap="none",
-            hx_on_htmx_after_request="updateDashboard(event)",
+            hx_get=get_layout.to(project_name=project_name),
+            hx_trigger="change delay:500ms, load",
+            hx_target="#main-content",
+            hx_swap="innerHTML",
         ),
         sidebar_footer,
         id="sidebar",
@@ -170,10 +170,7 @@ def project_dashboard(sess: dict, project_name: str):
     )
 
     main_content = Main(
-        Div(
-            H3("Loading metrics...", cls="loading loading-dots loading-lg text-primary"),
-            cls="m-auto loading-container",
-        ),
+        ChartsContainer(db.get_metrics_schema(runs)),
         id="main-content",
         cls="relative flex-1 min-w-0 overflow-y-auto p-6 pr-8 bg-muted/10",
     )
@@ -195,6 +192,16 @@ def project_dashboard(sess: dict, project_name: str):
             cls="flex flex-col h-screen overflow-hidden",
         ),
     )
+
+
+@rt("/{project_name}/layout")
+def get_layout(project_name: str, runs: list[str] | None = None):
+    db = get_db(project_name)
+    runs = runs or []
+    filtered_runs = [r for r in db.get_runs() if r in runs]
+    selected_runs = runs or []
+    ck = cookie("selected_runs", selected_runs, path=f"/{project_name}")
+    return ChartsContainer(db.get_metrics_schema(runs)), ck
 
 
 @rt("/{project_name}/data")
@@ -229,8 +236,8 @@ def get_data(
 @click.option("--port", default=8000, type=int)
 @click.option("--project", default=None)
 def main(host, port, project):
-    global default_project
-    default_project = project
+    if project:
+        os.environ["TRACKIO_DEFAULT_PROJECT"] = project
     serve(host=host, port=port, reload=True, appname="trackio_ui.main")
 
 

@@ -39,7 +39,7 @@ def RunEntry(run_name):
     )
 
 
-def RunsListComponent(runs_names: list[str]):
+def RunsListComponent(runs_names: list[str], id="runs-list-container"):
     runs_names = runs_names or []
     ids_json = json.dumps([r for r in runs_names])
     alpine_data = f"{{ selected: $persist([]), allIds: {ids_json} }}"
@@ -55,12 +55,12 @@ def RunsListComponent(runs_names: list[str]):
         ),
         Div(
             *[RunEntry(r) for r in runs_names],
-            id="runs-list-container",
             cls="flex-1 min-h-0 overflow-y-auto overflow-x-auto mt-2 border border-gray w-full",
         ),
         x_data=alpine_data,
         x_init="selected = selected.filter(id => allIds.includes(id))",
         cls="flex flex-col flex-1 min-h-0",
+        id=id,
     )
 
 
