@@ -6,7 +6,34 @@ const Charts = (() => {
     let logX = false, logY = false;
     let modalInstance = null;
 
-    // --- Observer ---
+    // --- Theme helpers ---
+
+    function cssColor(varName, fallback) {
+        const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        return v ? `hsl(${v})` : fallback;
+    }
+
+    function themeColors() {
+        return {
+            text: cssColor('--foreground', '#666'),
+            tooltipBg: cssColor('--card', '#fff'),
+            tooltipBorder: cssColor('--border', '#e5e7eb'),
+        };
+    }
+
+    function legendFontSize() {
+        return document.documentElement.classList.contains('uk-font-base') ? 12 : 11;
+    }
+
+    new MutationObserver(() => {
+        renderVisible();
+        if (modalInstance) {
+            const path = document.getElementById('chart-modal-title')?.textContent;
+            if (path) openModal(path);
+        }
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+    // --- Observer (lazy render) ---
 
     const observer = new IntersectionObserver(entries => {
         entries.forEach(({ target, isIntersecting }) => {
@@ -21,7 +48,6 @@ const Charts = (() => {
 
     // --- Data ---
 
-    // payload: { runName: { metricPath: { x: [], y: [] } } }
     function ingestData(payload) {
         for (const [run, metrics] of Object.entries(payload))
             for (const [path, series] of Object.entries(metrics))
@@ -42,68 +68,60 @@ const Charts = (() => {
 
     function colorFor(run) {
         if (!runColors.has(run)) {
-            const palette = echarts.theme?.default?.color ?? [
-                '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
-                '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'
-            ];
+            const palette = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+                '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
             runColors.set(run, palette[runColors.size % palette.length]);
         }
         return runColors.get(run);
     }
 
-    function renderVisible() {
-        document.querySelectorAll('[data-metric]').forEach(el => {
-            if (dataCache.has(el.dataset.metric)) renderChart(el);
-        });
-    }
-
-    // Shared series builder — used by both renderChart and openModal
     function buildSeries(path) {
         const EPS = 1e-10;
         return Object.entries(dataCache.get(path) ?? {}).map(([run, { x, y }]) => ({
             name: run, type: 'line',
-            data: x.map((v, i) => [
-                logX ? Math.max(EPS, v) : v,
-                logY ? Math.max(EPS, y[i]) : y[i],
-            ]),
+            data: x.map((v, i) => [logX ? Math.max(EPS, v) : v,
+            logY ? Math.max(EPS, y[i]) : y[i]]),
             showSymbol: false, animation: false,
             lineStyle: { width: 1.5 },
             itemStyle: { color: colorFor(run) },
         }));
     }
 
-    function renderChart(cardEl) {
-        const path = cardEl.dataset.metric;
-        const canvas = cardEl.querySelector('.chart-canvas');
-        if (!canvas) return;
-
+    /**
+     * Shared chart option builder — single source of truth for both inline
+     * charts and the modal, avoiding duplication.
+     *
+     * @param {Array}  series  - built by buildSeries()
+     * @param {Object} colors  - from themeColors()
+     * @param {Object} [extra] - optional overrides: { grid, dataZoom }
+     */
+    function buildChartOptions(series, colors, extra = {}) {
         const EPS = 1e-10;
-        const chart = instances.get(path) ?? (() => {
-            const c = echarts.init(canvas, null, { renderer: 'canvas' });
-            instances.set(path, c);
-            return c;
-        })();
-
-        const series = buildSeries(path);
-        chart.setOption({
+        const opts = {
             animation: false,
             tooltip: {
                 trigger: 'axis', confine: true,
                 axisPointer: { type: 'line', animation: false },
                 formatter: tooltipFormatter,
+                backgroundColor: colors.tooltipBg,
+                borderColor: colors.tooltipBorder,
+                textStyle: { color: colors.text, fontSize: 12 },
             },
-            grid: { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
+            grid: extra.grid ?? { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
             xAxis: { type: logX ? 'log' : 'value', scale: true, min: logX ? EPS : undefined },
             yAxis: {
                 type: logY ? 'log' : 'value', scale: true, min: logY ? EPS : undefined,
-                splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } }
+                splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } },
             },
             series,
             legend: {
-                bottom: 0, icon: 'circle', type: 'scroll', textStyle: { fontSize: 9 },
+                bottom: 0, icon: 'circle', type: 'scroll',
+                textStyle: { fontSize: legendFontSize(), color: colors.text },
                 data: series.map(s => ({ name: s.name, itemStyle: { color: colorFor(s.name) } })),
             },
-        }, { notMerge: true });
+        };
+        if (extra.dataZoom) opts.dataZoom = extra.dataZoom;
+        return opts;
     }
 
     function tooltipFormatter(params) {
@@ -115,53 +133,52 @@ const Charts = (() => {
         return `<small>${params[0].axisValueLabel}</small><br>${rows}`;
     }
 
+    function renderVisible() {
+        document.querySelectorAll('[data-metric]').forEach(el => {
+            if (dataCache.has(el.dataset.metric)) renderChart(el);
+        });
+    }
+
+    function renderChart(cardEl) {
+        const path = cardEl.dataset.metric;
+        const canvas = cardEl.querySelector('.chart-canvas');
+        if (!canvas) return;
+        const chart = instances.get(path) ?? (() => {
+            const c = echarts.init(canvas, null, { renderer: 'canvas' });
+            instances.set(path, c);
+            return c;
+        })();
+        chart.setOption(
+            buildChartOptions(buildSeries(path), themeColors()),
+            { notMerge: true }
+        );
+    }
+
     // --- Modal ---
 
     function openModal(path) {
         if (!dataCache.has(path)) return;
-
         document.getElementById('chart-modal-title').textContent = path;
-
         if (modalInstance) { modalInstance.dispose(); modalInstance = null; }
 
-        // Init with explicit dimensions before showing so the chart is already
-        // drawn during the open animation — no empty-modal flash.
         const canvas = document.getElementById('chart-modal-canvas');
-        const modalW = Math.min(window.innerWidth * 0.85, 1200) - 80;  // approx dialog width minus padding
+        const modalW = Math.min(window.innerWidth * 0.85, 1200) - 80;
         modalInstance = echarts.init(canvas, null, { renderer: 'canvas', width: modalW, height: 520 });
 
-        const EPS = 1e-10;
-        const series = buildSeries(path);
-        modalInstance.setOption({
-            animation: false,
-            tooltip: {
-                trigger: 'axis', confine: true,
-                axisPointer: { type: 'line', animation: false },
-                formatter: tooltipFormatter,
-            },
-            grid: { left: '8%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
-            xAxis: { type: logX ? 'log' : 'value', scale: true, min: logX ? EPS : undefined },
-            yAxis: {
-                type: logY ? 'log' : 'value', scale: true, min: logY ? EPS : undefined,
-                splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } }
-            },
-            dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: '8%' }],
-            series,
-            legend: {
-                bottom: 0, icon: 'circle', type: 'scroll', textStyle: { fontSize: 9 },
-                data: series.map(s => ({ name: s.name, itemStyle: { color: colorFor(s.name) } })),
-            },
-        }, { notMerge: true });
+        modalInstance.setOption(
+            buildChartOptions(buildSeries(path), themeColors(), {
+                grid: { left: '8%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
+                dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: '8%' }],
+            }),
+            { notMerge: true }
+        );
 
         UIkit.modal('#chart-modal').show();
-
-        // Correct any dimension mismatch once animation settles
         document.getElementById('chart-modal').addEventListener('shown', () => {
             modalInstance?.resize();
         }, { once: true });
     }
 
-    // Dispose when UIkit closes the modal (backdrop click, Escape, or Close button)
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('chart-modal')?.addEventListener('hidden', () => {
             if (modalInstance) { modalInstance.dispose(); modalInstance = null; }
@@ -173,7 +190,6 @@ const Charts = (() => {
     function setLogAxes(x, y) {
         logX = x; logY = y;
         renderVisible();
-        // Re-render modal chart with updated axis type if open
         if (modalInstance) {
             const path = document.getElementById('chart-modal-title')?.textContent;
             if (path) openModal(path);
@@ -214,7 +230,6 @@ const Charts = (() => {
         }
     });
 
-    // SSE data events
     document.addEventListener('charts:data', e => ingestData(e.detail));
 
     return {

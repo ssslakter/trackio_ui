@@ -4,7 +4,7 @@ from monsterui.all import *
 
 
 def LabeledCheckbox(label, id, name=None, checked=False, onchange=None, onclick=None, cls_colors="checkbox-primary", **kwargs):
-    """Generic component for a checkbox with a label."""
+    """Checkbox + label pair used throughout the sidebar."""
     return Div(
         CheckboxX(
             id=id,
@@ -15,18 +15,18 @@ def LabeledCheckbox(label, id, name=None, checked=False, onchange=None, onclick=
             cls=f"checkbox checkbox-sm {cls_colors} mr-2",
             **kwargs,
         ),
-        Label(label, cls="font-semibold text-sm cursor-pointer", htmlFor=id),
+        FormLabel(label, fr=id),
         cls="flex items-center",
     )
 
 
 def SidebarSection(*content, cls=""):
     """Container for logical groups in the sidebar."""
-    return Div(*content, cls=f"p-4 border-b space-y-4 {cls}")
+    return Div(*content, cls=f"p-4 border-b space-y-3 {cls}")
 
 
 def RunEntry(run_name):
-    """Specific component for an individual run item in the list."""
+    """Single run row in the runs list."""
     return Div(
         CheckboxX(
             name="runs",
@@ -35,13 +35,13 @@ def RunEntry(run_name):
             cls="checkbox checkbox-sm checkbox-primary mr-3",
         ),
         Span(run_name, cls="text-sm"),
-        cls="flex items-center hover:bg-muted/50 p-2 rounded-md cursor-pointer transition-colors",
+        cls="flex items-center hover:bg-base-content/5 px-2 py-1.5 cursor-pointer transition-colors",
     )
 
 
 def RunsListComponent(runs_names: list[str], id="runs-list-container"):
     runs_names = runs_names or []
-    ids_json = json.dumps([r for r in runs_names])
+    ids_json = json.dumps(list(runs_names))
     alpine_data = f"{{ selected: $persist([]), allIds: {ids_json} }}"
     return Div(
         LabeledCheckbox(
@@ -55,11 +55,11 @@ def RunsListComponent(runs_names: list[str], id="runs-list-container"):
         ),
         Div(
             *[RunEntry(r) for r in runs_names],
-            cls="flex-1 min-h-0 overflow-y-auto overflow-x-auto mt-2 border border-gray w-full",
+            cls="flex-1 min-h-0 overflow-y-auto overflow-x-auto mt-2 w-full uk-card shadow-none",
         ),
         x_data=alpine_data,
         x_init="selected = selected.filter(id => allIds.includes(id))",
-        cls="flex flex-col flex-1 min-h-0",
+        cls="flex flex-col flex-1 min-h-0 mt-2",
         id=id,
     )
 
@@ -73,8 +73,7 @@ def ResizeHandle():
 
 
 def ResizeScript():
-    return Script(
-        """
+    return Script("""
 document.addEventListener('alpine:init', () => {
 Alpine.data('sidebarResize', () => ({
     init() {
@@ -90,26 +89,21 @@ Alpine.data('sidebarResize', () => ({
       const wrapper = document.getElementById('layout-wrapper');
       const startX = e.clientX;
       const startW = sidebar.offsetWidth;
-
-      // Write directly to CSS var
       const onMove = (ev) => {
         const maxW = Math.floor(window.innerWidth * 0.5);
         const minW = Math.floor(window.innerWidth * 0.1);
         const newW = Math.min(maxW, Math.max(minW, startW + ev.clientX - startX));
         wrapper.style.setProperty('--sidebar-width', newW + 'px');
       };
-
       const onUp = () => {
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         localStorage.setItem('sidebarWidth', wrapper.style.getPropertyValue('--sidebar-width'));
-        if (typeof Charts !== 'undefined') Charts.resize(); 
+        if (typeof Charts !== 'undefined') Charts.resize();
       };
-
       document.addEventListener('pointermove', onMove, { passive: true });
       document.addEventListener('pointerup', onUp);
     }
   }));
 });
-"""
-    )
+""")

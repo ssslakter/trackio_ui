@@ -15,11 +15,12 @@ def ChartCard(path):
         Button(
             UkIcon("maximize-2", height=13, width=13),
             onclick=f"Charts.openModal('{path}')",
-            cls="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity btn btn-xs btn-ghost p-1",
+            cls="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-60 "
+            "hover:!opacity-100 transition-opacity btn btn-xs btn-ghost p-1",
         ),
         id=f"chart-{_slug(path)}",
         data_metric=path,
-        cls="relative group flex flex-col border rounded-lg p-3 h-64",
+        cls="relative group flex flex-col p-2 h-64 uk-card",
         style="contain:strict",
     )
 
@@ -35,13 +36,25 @@ def ChartModal():
     )
 
 
+def GroupPanel(*content, label, id, open=True):
+    return Details(
+        Summary(
+            label,
+            cls="!font-bold text-xs uppercase tracking-widest opacity-50 select-none",
+        ),
+        Div(*content, cls="flex flex-col gap-6 pt-2"),
+        open=open,
+        id=id,
+        cls="p-4 bg-card uk-card",
+    )
+
+
 def _render(node: dict[str, dict], prefix=""):
     cards = [ChartCard(f"{prefix}/{k}".lstrip("/")) for k, v in sorted(node.items()) if v is None]
     folders = [
-        Details(
-            Summary(k, cls="cursor-pointer text-xs font-bold uppercase tracking-widest opacity-50 py-2 select-none"),
-            Div(*_render(v, f"{prefix}/{k}".lstrip("/")), cls="flex flex-col gap-6 pt-2"),
-            open=True,
+        GroupPanel(
+            *_render(v, f"{prefix}/{k}".lstrip("/")),
+            label=k,
             id=f"folder-{_slug(prefix + k)}",
         )
         for k, v in sorted(node.items())

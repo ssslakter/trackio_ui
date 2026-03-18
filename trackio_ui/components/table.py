@@ -24,6 +24,7 @@ def _header_cell(col: str) -> FT:
     return Th(
         CheckboxX(
             id="select-all-rows",
+            cls="checkbox checkbox-sm checkbox-primary",
             **{
                 "@click": "selected = (selected.length === allIds.length) ? [] : [...allIds]",
                 ":checked": "allIds.length > 0 && selected.length === allIds.length",
@@ -37,15 +38,19 @@ def _header_cell(col: str) -> FT:
 def _body_cell(col: str, val) -> FT:
     if col == "Select":
         return Td(
-        CheckboxX(name="selected_runs", value=val, **{"x-model": "selected"}, cls="row-checkbox"),
-        shrink=True,
-    )
+            CheckboxX(
+                name="selected_runs",
+                value=val,
+                cls="checkbox checkbox-sm checkbox-primary row-checkbox",
+                **{"x-model": "selected"},
+            ),
+            shrink=True,
+        )
     elif col == "Created":
         dt_obj = datetime.fromisoformat(val)
         formatted = dt_obj.strftime("%B %d, %Y at %I:%M %p")
         return Td(formatted, cls="whitespace-nowrap")
     return Td(str(val) if val is not None else "-", cls="whitespace-nowrap max-w-xs truncate")
-    
 
 
 def RunsTable(project_name: str, runs: list[dict], id: str = "runs_table"):

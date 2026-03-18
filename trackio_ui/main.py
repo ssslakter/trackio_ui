@@ -35,6 +35,11 @@ headers = [
   #layout-wrapper { --sidebar-width: 280px; }
     """),
     Theme.blue.headers(),
+    Style("""
+    /* number input spinners follow the page color-scheme (light/dark) */
+    html:not(.dark) { color-scheme: light; }
+    html.dark        { color-scheme: dark;  }
+    """),
 ]
 
 
@@ -118,8 +123,9 @@ def project_dashboard(project_name: str):
         cls="justify-center shrink-0",
     )
     main_id = "#main-content"
+
     controls_form = Form(
-        H3("Controls"),
+        P("Controls", cls="text-xs font-bold uppercase tracking-widest opacity-50"),
         SliderInput(
             name="smoothing",
             label="Smoothing",
@@ -127,7 +133,6 @@ def project_dashboard(project_name: str):
             max="0.99",
             step="0.01",
             default="0.5",
-            cls="space-y-2",
         ),
         LabelInput(
             label="Max Points",
@@ -140,7 +145,7 @@ def project_dashboard(project_name: str):
         Div(
             LabeledCheckbox("log-x Axis", "log-x-axis", cls_colors="checkbox-secondary", x_model="logX"),
             LabeledCheckbox("log-y Axis", "log-y-axis", cls_colors="checkbox-secondary", x_model="logY"),
-            cls="flex flex-row flex-wrap gap-4 py-2",
+            cls="flex flex-row flex-wrap gap-4",
             x_data="{ logX: false, logY: false }",
             **{"@change": "Charts.setLogAxes(logX, logY)"},
         ),
@@ -149,8 +154,9 @@ def project_dashboard(project_name: str):
         hx_trigger="change",
         hx_swap="none",
         hx_include="#runs-form",
-        cls="flex flex-col shrink-0",
+        cls="flex flex-col gap-3 shrink-0",
     )
+
     runs_list = RunsListComponent(runs)
     runs_form = Form(
         runs_list,
@@ -166,7 +172,7 @@ def project_dashboard(project_name: str):
     controls_section = SidebarSection(
         controls_form,
         runs_form,
-        cls="flex flex-col min-h-0 overflow-hidden", 
+        cls="flex flex-col min-h-0 overflow-hidden",
     )
 
     sidebar_footer = Div(
@@ -185,8 +191,8 @@ def project_dashboard(project_name: str):
         controls_section,
         sidebar_footer,
         id="sidebar",
-    cls="h-full bg-card border-r grid shrink-0",
-    style="width: var(--sidebar-width); grid-template-rows: auto 1fr auto;",
+        cls="h-full bg-card border-r grid shrink-0",
+        style="width: var(--sidebar-width); grid-template-rows: auto 1fr auto;",
     )
 
     main_content = Main(

@@ -21,24 +21,27 @@ def ProjectHeader(project_name, active_tab="dashboard"):
     )
 
 
+def SectionLabel(text):
+    return P(text, cls="text-xs font-bold uppercase tracking-widest opacity-50")
+
+
 def SliderInput(name, label, min="0", max="1", step="0.01", default="0.5", **kwargs):
     return Div(
-        Label(label, fr=name, cls="uk-form-label"),
-        Div(
-            Input(
-                type="range",
-                name=name,
-                id=name,
-                min=min,
-                max=max,
-                step=step,
-                x_init="$el.value = val",
-                cls="uk-range w-full",
-                **{"@input": f"val = $el.value; localStorage.setItem('{name}', val)"},
-            ),
-            Span(x_text="parseFloat(val).toFixed(2)", cls="text-sm text-muted-foreground tabular-nums"),
+        FormLabel(label, fr=name),
+        Input(
+            type="range",
+            name=name,
+            id=name,
+            min=min,
+            max=max,
+            step=step,
+            x_init="$el.value = val",
+            cls="uk-range w-full mt-1",
+            **{"@input": f"val = $el.value; localStorage.setItem('{name}', val)"},
         ),
+        Span(x_text="parseFloat(val).toFixed(2)", cls="text-sm text-muted-foreground tabular-nums"),
         x_data=f"{{val: parseFloat(localStorage.getItem('{name}') ?? '{default}')}}",
+        cls="flex flex-col gap-1",
         **kwargs,
     )
 
