@@ -352,7 +352,7 @@ async def live_generator(project_name: str):
                         yield sse_json({"data": prepared}, event="data_update")
 
             tick_count += 1
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
     finally:
         pass
 

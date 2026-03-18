@@ -163,6 +163,16 @@ const Charts = (() => {
                 renderChart(el);
             }
         });
+
+        if (modalInstance) {
+            const modalTitleEl = document.getElementById('chart-modal-title');
+            const path = modalTitleEl ? modalTitleEl.textContent : null;
+            if (path && dataCache.has(path)) {
+                modalInstance.setOption({
+                    series: buildSeries(path)
+                });
+            }
+        }
     }
 
     function renderChart(cardEl) {
