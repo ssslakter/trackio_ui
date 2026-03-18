@@ -135,21 +135,24 @@ def min_max_downsample(x, y, target_points):
     if n <= target_points:
         return x, y
 
-    num_chunks = target_points // 2
+    target_chunks = max(1, int(target_points) // 2)
+    chunk_size = max(1, n // target_chunks)
+    num_chunks = n // chunk_size
+    trunc_len = num_chunks * chunk_size
 
-    indices = np.arange(n)
-    chunks = np.array_split(indices, num_chunks)
+    y_trunc = y[:trunc_len].reshape(num_chunks, chunk_size)
+    offsets = np.arange(num_chunks) * chunk_size
+    min_idx = np.argmin(y_trunc, axis=1) + offsets
+    max_idx = np.argmax(y_trunc, axis=1) + offsets
 
-    final_indices = []
-    for chunk in chunks:
-        if len(chunk) == 0:
-            continue
-        chunk_vals = y[chunk]
-        final_indices.append(chunk[np.argmin(chunk_vals)])
-        final_indices.append(chunk[np.argmax(chunk_vals)])
+    arrays_to_concat = [min_idx, max_idx, [n - 1]]
+    if trunc_len < n:
+        rem_y = y[trunc_len:]
+        arrays_to_concat.insert(
+            2,
+            [trunc_len + np.argmin(rem_y), trunc_len + np.argmax(rem_y)],
+        )
 
-    final_indices.append(n - 1)
-
-    final_indices = np.unique(final_indices)
+    final_indices = np.unique(np.concatenate(arrays_to_concat)).astype(int)
 
     return x[final_indices], y[final_indices]

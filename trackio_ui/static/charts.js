@@ -2,6 +2,7 @@ const Charts = (() => {
     const instances = new Map();  // metricPath -> ECharts instance
     const dataCache = new Map();  // metricPath -> { runName: {x, y} }
     const runColors = new Map();
+    const visibleCharts = new Set(); // Keep track of visible charts
 
     let logX = false, logY = false;
     let modalInstance = null;
@@ -25,11 +26,16 @@ const Charts = (() => {
         return document.documentElement.classList.contains('uk-font-base') ? 12 : 11;
     }
 
+    let currentTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
     new MutationObserver(() => {
-        renderVisible();
-        if (modalInstance) {
-            const path = document.getElementById('chart-modal-title')?.textContent;
-            if (path) openModal(path);
+        const newTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+        if (newTheme !== currentTheme) {
+            currentTheme = newTheme;
+            renderVisible();
+            if (modalInstance) {
+                const path = document.getElementById('chart-modal-title')?.textContent;
+                if (path) openModal(path);
+            }
         }
     }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
@@ -37,8 +43,13 @@ const Charts = (() => {
 
     const observer = new IntersectionObserver(entries => {
         entries.forEach(({ target, isIntersecting }) => {
-            if (isIntersecting && dataCache.has(target.dataset.metric))
-                renderChart(target);
+            const path = target.dataset.metric;
+            if (isIntersecting) {
+                visibleCharts.add(path);
+                if (dataCache.has(path)) renderChart(target);
+            } else {
+                visibleCharts.delete(path);
+            }
         });
     }, { rootMargin: '120px' });
 
@@ -87,14 +98,6 @@ const Charts = (() => {
         }));
     }
 
-    /**
-     * Shared chart option builder — single source of truth for both inline
-     * charts and the modal, avoiding duplication.
-     *
-     * @param {Array}  series  - built by buildSeries()
-     * @param {Object} colors  - from themeColors()
-     * @param {Object} [extra] - optional overrides: { grid, dataZoom }
-     */
     function buildChartOptions(series, colors, extra = {}) {
         const EPS = 1e-10;
         const opts = {
@@ -135,7 +138,10 @@ const Charts = (() => {
 
     function renderVisible() {
         document.querySelectorAll('[data-metric]').forEach(el => {
-            if (dataCache.has(el.dataset.metric)) renderChart(el);
+            const path = el.dataset.metric;
+            if (visibleCharts.has(path) && dataCache.has(path)) {
+                renderChart(el);
+            }
         });
     }
 
@@ -143,11 +149,11 @@ const Charts = (() => {
         const path = cardEl.dataset.metric;
         const canvas = cardEl.querySelector('.chart-canvas');
         if (!canvas) return;
-        const chart = instances.get(path) ?? (() => {
-            const c = echarts.init(canvas, null, { renderer: 'canvas' });
-            instances.set(path, c);
-            return c;
-        })();
+        let chart = instances.get(path);
+        if (!chart) {
+            chart = echarts.init(canvas, null, { renderer: 'canvas' });
+            instances.set(path, chart);
+        }
         chart.setOption(
             buildChartOptions(buildSeries(path), themeColors()),
             { notMerge: true }
@@ -159,11 +165,12 @@ const Charts = (() => {
     function openModal(path) {
         if (!dataCache.has(path)) return;
         document.getElementById('chart-modal-title').textContent = path;
-        if (modalInstance) { modalInstance.dispose(); modalInstance = null; }
 
         const canvas = document.getElementById('chart-modal-canvas');
-        const modalW = Math.min(window.innerWidth * 0.85, 1200) - 80;
-        modalInstance = echarts.init(canvas, null, { renderer: 'canvas', width: modalW, height: 520 });
+        if (!modalInstance) {
+            const modalW = Math.min(window.innerWidth * 0.85, 1200) - 80;
+            modalInstance = echarts.init(canvas, null, { renderer: 'canvas', width: modalW, height: 520 });
+        }
 
         modalInstance.setOption(
             buildChartOptions(buildSeries(path), themeColors(), {
@@ -181,7 +188,10 @@ const Charts = (() => {
 
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('chart-modal')?.addEventListener('hidden', () => {
-            if (modalInstance) { modalInstance.dispose(); modalInstance = null; }
+            if (modalInstance) { 
+                modalInstance.dispose(); 
+                modalInstance = null; 
+            }
         });
     });
 
@@ -207,10 +217,17 @@ const Charts = (() => {
         }, 150);
     });
 
-    document.addEventListener('htmx:afterSettle', () => {
+    document.addEventListener('htmx:afterSettle', (e) => {
+        const targetEl = e.target;
+        if (targetEl && targetEl.querySelectorAll) {
+            targetEl.querySelectorAll('[data-metric]').forEach(el => observer.observe(el));
+        }
+
         const island = document.getElementById('chart-data-payload');
-        if (!island) return;
-        observeAll();
+        
+        if (!island || island.dataset.processed) return;
+        island.dataset.processed = "true";
+
         const raw = JSON.parse(island.textContent);
         if (!raw.data) return;
         const { data, runs, schema_changed } = raw;
@@ -218,15 +235,21 @@ const Charts = (() => {
             instances.forEach(c => c.dispose());
             instances.clear();
             runColors.clear();
+            visibleCharts.clear();
+            observer.disconnect();
+            observeAll();
         }
         pruneRuns(runs);
         ingestData(data);
     });
 
     document.addEventListener('htmx:beforeSwap', e => {
-        if (e.detail.target === document.body) {
+        // Only clear out when the actual content pane swaps
+        if (e.detail.target.id === 'main-content') {
             instances.forEach(c => c.dispose());
             instances.clear();
+            visibleCharts.clear();
+            observer.disconnect();
         }
     });
 

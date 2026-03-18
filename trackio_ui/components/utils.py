@@ -46,6 +46,15 @@ def SliderInput(name, label, min="0", max="1", step="0.01", default="0.5", **kwa
     )
 
 
+def LoadingIndicator():
+    return Div(
+        Div(Div(), Div(), Div(), cls="dot-wave"),
+        P("Loading dashboard...", cls="text-sm font-medium opacity-50 mt-4"),
+        cls="flex flex-col items-center justify-center h-full w-full bg-muted/10",
+        id="charts-container",
+    )
+
+
 def SSEListener(project_name: str):
     from trackio_ui.main import live_stream
 

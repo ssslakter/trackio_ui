@@ -27,18 +27,47 @@ headers = [
     Script(src="/static/charts.js"),
     Script(src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.x.x/dist/cdn.min.js", defer=True),
     Script(src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js", defer=True),
-    Style("""
-    [x-cloak] { display: none !important; }
-    """),
-    Style("""
-  #sidebar { width: var(--sidebar-width, 280px); }
-  #layout-wrapper { --sidebar-width: 280px; }
-    """),
     Theme.blue.headers(),
     Style("""
+    .dot-wave { display: flex; gap: 4px; align-items: center; justify-content: center; }
+    .dot-wave div { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: dot-wave 1.4s infinite ease-in-out both; }
+    .dot-wave div:nth-child(1) { animation-delay: -0.32s; }
+    .dot-wave div:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes dot-wave {
+        0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    """),
+    Style("""
+    [x-cloak] {
+        display: none !important;
+    }
+
+    #sidebar {
+        width: var(--sidebar-width, 280px);
+    }
+
+    #layout-wrapper {
+        --sidebar-width: 280px;
+    }
+
     /* number input spinners follow the page color-scheme (light/dark) */
-    html:not(.dark) { color-scheme: light; }
-    html.dark        { color-scheme: dark;  }
+    html:not(.dark) {
+        color-scheme: light;
+    }
+
+    html.dark {
+        color-scheme: dark;
+    }
+
+    button.htmx-request .spin-indicator {
+        animation: htmx-spin 1s linear infinite;
+        transform-origin: center;
+    }
+    @keyframes htmx-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
     """),
 ]
 
@@ -72,9 +101,9 @@ def index():
 
 
 @rt("/{project_name}/runs")
-def get_runs(sess, project_name: str):
+def get_runs(project_name: str):
     runs = get_db(project_name).get_runs()
-    return RunsListComponent(runs)
+    return RunsListItems(runs)
 
 
 @rt("/{project_name}/table")
@@ -154,10 +183,24 @@ def project_dashboard(project_name: str):
         hx_trigger="change",
         hx_swap="none",
         hx_include="#runs-form",
+        hx_indicator="#main-refresh-btn",
         cls="flex flex-col gap-3 shrink-0",
     )
 
-    runs_list = RunsListComponent(runs)
+    runs_list = RunsListComponent(project_name, runs)
+    runs_form = Form(
+        runs_list,
+        id="runs-form",
+        hx_post=get_charts.to(project_name=project_name),
+        hx_trigger="change delay:500ms, load",
+        hx_target=main_id,
+        hx_swap="innerHTML",
+        hx_include=f"#{controls_form.id}",
+        hx_indicator="#main-refresh-btn",
+        cls="flex flex-col flex-1 min-h-0",
+    )
+
+    runs_list = RunsListComponent(project_name, runs)
     runs_form = Form(
         runs_list,
         id="runs-form",
@@ -177,13 +220,16 @@ def project_dashboard(project_name: str):
 
     sidebar_footer = Div(
         Button(
-            "Refresh runs",
-            cls=(ButtonT.primary, "w-full", "mt-2"),
-            hx_get=get_runs.to(project_name=project_name),
-            hx_target=f"#{runs_list.id}",
-            hx_swap="outerHTML",
+            UkIcon("refresh-cw", cls="mr-2 spin-indicator", width=16, height=16),
+            "Refresh Data",
+            id="main-refresh-btn",
+            cls=(ButtonT.primary, "w-full", "flex", "items-center", "justify-center"),
+            hx_post=get_charts.to(project_name=project_name),
+            hx_include="#runs-form, #controls-form",
+            hx_target=main_id,
+            hx_swap="innerHTML",
         ),
-        cls="p-4 border-t bg-card",
+        cls="p-4 border-t bg-card shrink-0",
     )
 
     sidebar = Aside(
@@ -196,7 +242,7 @@ def project_dashboard(project_name: str):
     )
 
     main_content = Main(
-        Div("Loading", id="charts-container"),
+        LoadingIndicator(),
         id=main_id[1:],
         cls="relative flex-1 min-w-0 overflow-y-auto p-6 pr-8 bg-muted/10",
     )

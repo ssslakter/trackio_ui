@@ -39,11 +39,23 @@ def RunEntry(run_name):
     )
 
 
-def RunsListComponent(runs_names: list[str], id="runs-list-container"):
+def RunsListItems(runs_names: list[str], id="runs-list-inner"):
+    """Inner scrollable list of runs. Swapped by HTMX independently."""
     runs_names = runs_names or []
     ids_json = json.dumps(list(runs_names))
-    alpine_data = f"{{ selected: $persist([]), allIds: {ids_json} }}"
     return Div(
+        *[RunEntry(r) for r in runs_names],
+        id=id,
+        x_init=f"allIds = {ids_json}; selected = selected.filter(id => allIds.includes(id))",
+        cls="flex-1 min-h-0 overflow-y-auto overflow-x-auto w-full uk-card shadow-none",
+    )
+
+
+def RunsListComponent(project_name: str, runs_names: list[str], id="runs-list-container"):
+    """Outer container holding the header, buttons, and Alpine.js state."""
+    alpine_data = "{ selected: $persist([]), allIds: [] }"
+
+    header = Div(
         LabeledCheckbox(
             "Select All Runs",
             "select-all",
@@ -53,12 +65,20 @@ def RunsListComponent(runs_names: list[str], id="runs-list-container"):
                 "x-effect": "$el.indeterminate = selected.length > 0 && selected.length < allIds.length",
             },
         ),
-        Div(
-            *[RunEntry(r) for r in runs_names],
-            cls="flex-1 min-h-0 overflow-y-auto overflow-x-auto mt-2 w-full uk-card shadow-none",
+        Button(
+            UkIcon("refresh-cw", height=14, width=14, cls="spin-indicator"),
+            title="Refresh Runs List",
+            hx_get=f"/{project_name}/runs",
+            hx_target="#runs-list-inner",
+            hx_swap="outerHTML",
+            cls="btn btn-xs btn-ghost p-1 opacity-50 hover:opacity-100 transition-opacity flex items-center justify-center",
         ),
+        cls="flex items-center justify-between mb-2",
+    )
+    return Div(
+        header,
+        RunsListItems(runs_names),
         x_data=alpine_data,
-        x_init="selected = selected.filter(id => allIds.includes(id))",
         cls="flex flex-col flex-1 min-h-0 mt-2",
         id=id,
     )
