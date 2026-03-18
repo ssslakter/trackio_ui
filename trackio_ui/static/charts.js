@@ -59,21 +59,28 @@ const Charts = (() => {
 
     // --- Data ---
 
+    function getCurrentSchema() {
+        return Array.from(document.querySelectorAll('[data-metric]'))
+            .map(el => el.dataset.metric);
+    }
+
     function ingestData(payload, isLive = false) {
-        let schemaChanged = false;
+        let needsLayoutRefresh = false;
+        const existingSchema = new Set(getCurrentSchema());
 
         for (const [run, metrics] of Object.entries(payload)) {
             for (const [path, series] of Object.entries(metrics)) {
-                if (isLive && !instances.has(path)) {
-                    schemaChanged = true;
+                if (isLive && !existingSchema.has(path)) {
+                    needsLayoutRefresh = true;
                 }
-                (dataCache.get(path) ?? dataCache.set(path, {}).get(path))[run] = series;
+
+                if (!dataCache.get(path)) dataCache.set(path, {});
+                dataCache.get(path)[run] = series;
             }
         }
 
-        if (schemaChanged) {
-            const btn = document.getElementById('main-refresh-btn');
-            if (btn) btn.click();
+        if (needsLayoutRefresh) {
+            document.getElementById('main-refresh-btn')?.click();
         } else {
             renderVisible();
         }
@@ -271,7 +278,7 @@ const Charts = (() => {
 
     return {
         observeAll, ingestData, pruneRuns, setLogAxes, openModal,
-        getCurrentSchema: () => [...instances.keys()],
+        getCurrentSchema,
         resize: () => instances.forEach(c => c.resize()),
     };
 })();

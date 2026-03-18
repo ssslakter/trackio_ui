@@ -83,7 +83,6 @@ app, rt = fast_app(
     bodykw={"hx-boost": "true"},
 )
 
-default_project = os.getenv("TRACKIO_DEFAULT_PROJECT", "")
 trackio_root = os.getenv("TRACKIO_ROOT", None)
 
 
@@ -98,7 +97,7 @@ def get_db(project_name) -> TrackioDatabase:
 
 @rt("/")
 def index():
-    print("Default project:", default_project)
+    default_project = os.getenv("TRACKIO_DEFAULT_PROJECT")
     return Redirect(f"/{default_project or 'default_project'}")
 
 
@@ -219,7 +218,8 @@ def project_dashboard(project_name: str):
             hx_target="#sse-wrapper",
             hx_swap="innerHTML",
         ),
-        cls="pb-2 pt-1",
+        x_data="{ live: $persist(false).as('trackio_live_updates') }",
+        cls="pb-2 pt-1"
     )
 
     controls_section = SidebarSection(
