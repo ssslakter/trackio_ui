@@ -1,11 +1,13 @@
 from importlib.resources import files
 from datetime import datetime
+import asyncio
 import json, orjson, tempfile, click
 from pathlib import Path
 from fasthtml.common import *
 from monsterui.all import *
 from .data import TrackioDatabase, prepare_metrics
 from .components import *
+from .utils import *
 
 
 # --- App Setup ---
@@ -18,8 +20,10 @@ headers = [
   })();
     """),
     ResizeScript(),
+    Script(src="https://unpkg.com/htmx-ext-sse@2.2.3/sse.js"),
     Script(src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"),
-    Script(src="/static/dashboard.js"),
+    Script(src="/static/sse.js"),
+    Script(src="/static/charts.js"),
     Script(src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.x.x/dist/cdn.min.js", defer=True),
     Script(src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js", defer=True),
     Style("""
@@ -104,6 +108,7 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
     db = get_db(project_name)
     runs = db.get_runs()
     selected_runs = selected_runs.split(",") if selected_runs else []
+    db.set_selected_runs(selected_runs)
 
     # Sidebar Construction
     sidebar_header = SidebarSection(
@@ -135,9 +140,10 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
             x_model="val",
         ),
         Div(
-            LabeledCheckbox("log-x axis", "log-x-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
-            LabeledCheckbox("log-y axis", "log-y-axis", onchange="updateChartsAxisType()", cls_colors="checkbox-secondary"),
+            LabeledCheckbox("log-x Axis", "log-x-axis", cls_colors="checkbox-secondary"),
+            LabeledCheckbox("log-y Axis", "log-y-axis", cls_colors="checkbox-secondary"),
             cls="flex flex-row flex-wrap gap-4 py-2",
+            **{"@change": "Charts.setLogAxes($el.querySelector('#log-x-axis').checked, $el.querySelector('#log-y-axis').checked)"},
         ),
         (runs_list := RunsListComponent(runs)),
         cls="flex flex-col flex-1 min-h-0",
@@ -179,6 +185,7 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
         sidebar,
         ResizeHandle(),
         main_content,
+        SSEListener(project_name, active=True),
         cls="flex flex-1 min-h-0",
         id="layout-wrapper",
         style="--sidebar-width: 300px;",
@@ -199,26 +206,19 @@ def get_layout(project_name: str, runs: list[str] | None = None):
     db = get_db(project_name)
     runs = runs or []
     filtered_runs = [r for r in db.get_runs() if r in runs]
-    selected_runs = runs or []
-    ck = cookie("selected_runs", selected_runs, path=f"/{project_name}")
-    return ChartsContainer(db.get_metrics_schema(runs)), ck
+    db.set_selected_runs(filtered_runs)
+    ck = cookie("selected_runs", filtered_runs, path=f"/{project_name}")
+    return ChartsContainer(db.get_metrics_schema()), ck
 
 
 @rt("/{project_name}/data")
 def get_data(
-    sess,
     project_name: str,
     runs: list[str] | None = None,
     smoothing: float = 0.0,
     max_points: int = 0,
     refresh: bool = False,
 ):
-    sess[f"prefs_{project_name}"] = {
-        "selected_runs": runs or [],
-        "smoothing": str(smoothing),
-        "max_points": str(max_points),
-        "refresh": bool(refresh),
-    }
     if not runs:
         return json.dumps({"data": {}})
 
@@ -229,6 +229,29 @@ def get_data(
         option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS,
     )
     return Response(content=resp, media_type="application/json")
+
+
+shutdown_event = signal_shutdown()
+
+
+async def live_generator(project_name: str):
+    db = get_db(project_name)
+    while not shutdown_event.is_set():
+        # TODO figure out what is going on
+        # new_paths = db.get_metrics_schema(runs)
+        # if new_paths:
+        #     html = to_xml(ChartsContainer(new_paths))
+        #     yield sse_message(html, event="layout_add")
+
+        data = db.get_metrics()
+        yield sse_json({"data": prepare_metrics(data, 0.5, 10_000)}, event="data_update")
+
+        await asyncio.sleep(3)
+
+
+@rt("/{project_name}/live")
+async def live_stream(project_name: str):
+    return EventStream(live_generator(project_name))
 
 
 @click.command()

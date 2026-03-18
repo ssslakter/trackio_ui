@@ -12,7 +12,12 @@ class TrackioDatabase:
         self.db_path = Path(root / f"{project_name}.db").expanduser()
         self.db = database(self.db_path)
         self._cache = {}
+        self._send_schema = False
+        self.selected_runs = []
 
+    def set_selected_runs(self, run_names: list[str]):
+        self.selected_runs = run_names
+    
     def clear_cache(self):
         """Clears the in-memory cache."""
         self._cache.clear()
@@ -49,6 +54,10 @@ class TrackioDatabase:
 
         :param refresh: If True, ignores cache and re-fetches specified runs from DB.
         """
+        run_names = run_names or self.selected_runs
+        if self._send_schema: # this allows for cheap retrieval of metric after user fetched schema (with metrics), without hitting DB again
+            self._send_schema = False
+            return self.metrics
         if run_names is None:
             all_configs = self.get_runs()
             run_names = [c["run_name"] for c in all_configs]
@@ -67,7 +76,9 @@ class TrackioDatabase:
 
     def get_metrics_schema(self, run_names: Union[list[str], str, None] = None) -> list[str]:
         """Returns a list of all metric paths for the specified runs."""
-        metrics = self.get_metrics(run_names)
+        run_names = run_names or self.selected_runs
+        self.metrics = metrics = self.get_metrics(run_names)
+        self._send_schema = True
         if not metrics:
             return []
         first_df = next(iter(metrics.values()))

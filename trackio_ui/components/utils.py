@@ -19,3 +19,15 @@ def ProjectHeader(project_name, active_tab="dashboard"):
         ),
         cls="flex flex-col bg-card border-b shrink-0",
     )
+
+
+def SSEListener(project_name: str, active: bool = False):
+    from trackio_ui.main import live_stream
+    if not active:
+        return Div(id="sse-root")
+    return Div(
+        id="sse-root",
+        hx_ext="sse",
+        sse_connect=live_stream.to(project_name=project_name),
+        sse_swap="layout_add,layout_remove",
+    )
