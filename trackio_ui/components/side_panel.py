@@ -77,6 +77,13 @@ def ResizeScript():
         """
 document.addEventListener('alpine:init', () => {
 Alpine.data('sidebarResize', () => ({
+    init() {
+        const saved = localStorage.getItem('sidebarWidth');
+        if (saved) {
+            document.getElementById('layout-wrapper')
+                ?.style.setProperty('--sidebar-width', saved);
+        }
+    },
     startDrag(e) {
       e.preventDefault();
       const sidebar = document.getElementById('sidebar');
@@ -95,8 +102,8 @@ Alpine.data('sidebarResize', () => ({
       const onUp = () => {
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
-        // Persist
         localStorage.setItem('sidebarWidth', wrapper.style.getPropertyValue('--sidebar-width'));
+        if (typeof Charts !== 'undefined') Charts.resize(); 
       };
 
       document.addEventListener('pointermove', onMove, { passive: true });

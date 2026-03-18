@@ -166,7 +166,7 @@ def project_dashboard(project_name: str):
     controls_section = SidebarSection(
         controls_form,
         runs_form,
-        cls="flex flex-col flex-1 min-h-0",
+        cls="flex flex-col min-h-0 overflow-hidden", 
     )
 
     sidebar_footer = Div(
@@ -177,7 +177,7 @@ def project_dashboard(project_name: str):
             hx_target=f"#{runs_list.id}",
             hx_swap="outerHTML",
         ),
-        cls="shrink-0 p-4 border-t bg-card",
+        cls="p-4 border-t bg-card",
     )
 
     sidebar = Aside(
@@ -185,8 +185,8 @@ def project_dashboard(project_name: str):
         controls_section,
         sidebar_footer,
         id="sidebar",
-        cls="h-full bg-card border-r flex flex-col shrink-0",
-        style="width: var(--sidebar-width)",
+    cls="h-full bg-card border-r grid shrink-0",
+    style="width: var(--sidebar-width); grid-template-rows: auto 1fr auto;",
     )
 
     main_content = Main(

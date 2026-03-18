@@ -148,7 +148,11 @@ const Charts = (() => {
     // SSE data events
     document.addEventListener('charts:data', e => ingestData(e.detail));
 
-    return { observeAll, ingestData, pruneRuns, setLogAxes, getCurrentSchema: () => [...instances.keys()] };
+    return {
+        observeAll, ingestData, pruneRuns, setLogAxes,
+        getCurrentSchema: () => [...instances.keys()],
+        resize: () => instances.forEach(c => c.resize())
+    };
 })();
 
 document.addEventListener('DOMContentLoaded', Charts.observeAll);
