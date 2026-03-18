@@ -198,7 +198,7 @@ def project_dashboard(project_name: str):
         sidebar,
         ResizeHandle(),
         main_content,
-        Div(id="chart-data-payload"),
+        Script("{}", type="application/json", id="chart-data-payload"),
         SSEListener(project_name) if False else None,
         cls="flex flex-1 min-h-0",
         id="layout-wrapper",
@@ -230,10 +230,13 @@ def get_charts(
         sse_run_queues[project_name].put_nowait(filtered_runs)
     metrics, new_schema = db.get_metrics_and_schema(filtered_runs)
     data = prepare_metrics(metrics, smoothing=smoothing, max_points=max_points)
-    data_json = orjson.dumps({"data": data, "runs": filtered_runs}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS).decode()
+    schema_changed = set(current_schema or []) != set(new_schema)
+    data_json = orjson.dumps(
+        {"data": data, "runs": filtered_runs, "schema_changed": schema_changed}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
+    ).decode()
     data_island = Script(data_json, type="application/json", id="chart-data-payload", hx_swap_oob="true")
 
-    if set(current_schema or []) == set(new_schema):
+    if not schema_changed:
         return data_island, HtmxResponseHeaders(reswap="none")
     return ChartsContainer(new_schema), data_island
 

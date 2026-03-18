@@ -104,16 +104,27 @@ const Charts = (() => {
     });
 
     document.addEventListener('htmx:afterSettle', () => {
-        observeAll();
         const island = document.getElementById('chart-data-payload');
-        if (island) {
-            const { data, runs } = JSON.parse(island.textContent);
-            pruneRuns(runs);
-            ingestData(data);
-        } else {
-            renderVisible();
+        if (!island) return;
+        observeAll();
+        const raw = JSON.parse(island.textContent);
+        if (!raw.data) return;
+        const { data, runs, schema_changed } = raw;
+        if (schema_changed) {
+            instances.forEach(c => c.dispose());
+            instances.clear();
+        }
+        pruneRuns(runs);
+        ingestData(data);
+    });
+
+    document.addEventListener('htmx:beforeSwap', e => {
+        if (e.detail.target === document.body) {
+            instances.forEach(c => c.dispose());
+            instances.clear();
         }
     });
+
     // SSE data events
     document.addEventListener('charts:data', e => ingestData(e.detail));
 
