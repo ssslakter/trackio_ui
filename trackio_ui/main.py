@@ -150,7 +150,7 @@ def project_dashboard(project_name: str):
             **{"@change": "Charts.setLogAxes(logX, logY)"},
         ),
         id="controls-form",
-        hx_get=get_charts.to(project_name=project_name),
+        hx_post=get_charts.to(project_name=project_name),
         hx_trigger="change",
         hx_swap="none",
         hx_include="#runs-form",
@@ -161,7 +161,7 @@ def project_dashboard(project_name: str):
     runs_form = Form(
         runs_list,
         id="runs-form",
-        hx_get=get_charts.to(project_name=project_name),
+        hx_post=get_charts.to(project_name=project_name),
         hx_trigger="change delay:500ms, load",
         hx_target=main_id,
         hx_swap="innerHTML",

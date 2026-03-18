@@ -96,26 +96,6 @@ def process_metrics_to_dict(raw_metrics) -> dict[str, pd.DataFrame]:
     return results
 
 
-def apply_downsampling(df: pd.DataFrame, stride: int) -> pd.DataFrame:
-    """
-    Reduces rows by 'stride' while ensuring rows containing
-    sparse metrics (mostly NaN columns) are preserved.
-    """
-    if stride <= 1:
-        return df
-
-    column_density = df.count() / len(df)
-    sparse_cols = column_density[column_density < 0.9].index
-
-    stride_mask = np.arange(len(df)) % stride == 0
-
-    if not sparse_cols.empty:
-        sparse_mask = df[sparse_cols].notna().any(axis=1)
-        return df[stride_mask | sparse_mask]
-
-    return df[stride_mask]
-
-
 def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_points: int = 0):
     processed_data = {}
     for run_name, df in metrics.items():
@@ -156,20 +136,20 @@ def min_max_downsample(x, y, target_points):
         return x, y
 
     num_chunks = target_points // 2
-    chunk_size = n // num_chunks
-    limit = num_chunks * chunk_size
 
-    y_reshaped = y[:limit].reshape(num_chunks, chunk_size)
+    indices = np.arange(n)
+    chunks = np.array_split(indices, num_chunks)
 
-    arg_mins = np.argmin(y_reshaped, axis=1)
-    arg_maxs = np.argmax(y_reshaped, axis=1)
+    final_indices = []
+    for chunk in chunks:
+        if len(chunk) == 0:
+            continue
+        chunk_vals = y[chunk]
+        final_indices.append(chunk[np.argmin(chunk_vals)])
+        final_indices.append(chunk[np.argmax(chunk_vals)])
 
-    chunk_offsets = np.arange(0, limit, chunk_size)
-    idx_mins = arg_mins + chunk_offsets
-    idx_maxs = arg_maxs + chunk_offsets
+    final_indices.append(n - 1)
 
-    final_indices = np.concatenate([idx_mins, idx_maxs, [n - 1]])
-
-    final_indices.sort()
+    final_indices = np.unique(final_indices)
 
     return x[final_indices], y[final_indices]
