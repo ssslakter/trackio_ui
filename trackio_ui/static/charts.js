@@ -59,11 +59,24 @@ const Charts = (() => {
 
     // --- Data ---
 
-    function ingestData(payload) {
-        for (const [run, metrics] of Object.entries(payload))
-            for (const [path, series] of Object.entries(metrics))
+    function ingestData(payload, isLive = false) {
+        let schemaChanged = false;
+
+        for (const [run, metrics] of Object.entries(payload)) {
+            for (const [path, series] of Object.entries(metrics)) {
+                if (isLive && !instances.has(path)) {
+                    schemaChanged = true;
+                }
                 (dataCache.get(path) ?? dataCache.set(path, {}).get(path))[run] = series;
-        renderVisible();
+            }
+        }
+
+        if (schemaChanged) {
+            const btn = document.getElementById('main-refresh-btn');
+            if (btn) btn.click();
+        } else {
+            renderVisible();
+        }
     }
 
     function pruneRuns(activeRuns) {
@@ -188,9 +201,9 @@ const Charts = (() => {
 
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('chart-modal')?.addEventListener('hidden', () => {
-            if (modalInstance) { 
-                modalInstance.dispose(); 
-                modalInstance = null; 
+            if (modalInstance) {
+                modalInstance.dispose();
+                modalInstance = null;
             }
         });
     });
@@ -224,7 +237,7 @@ const Charts = (() => {
         }
 
         const island = document.getElementById('chart-data-payload');
-        
+
         if (!island || island.dataset.processed) return;
         island.dataset.processed = "true";
 
@@ -253,7 +266,8 @@ const Charts = (() => {
         }
     });
 
-    document.addEventListener('charts:data', e => ingestData(e.detail));
+    document.addEventListener('charts:data', e => ingestData(e.detail, false));
+    document.addEventListener('charts:live_data', e => ingestData(e.detail, true));
 
     return {
         observeAll, ingestData, pruneRuns, setLogAxes, openModal,

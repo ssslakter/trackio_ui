@@ -60,6 +60,42 @@ class TrackioDatabase:
         schema = next(iter(metrics.values())).columns.tolist()
         return metrics, schema
 
+    def get_max_steps(self, run_names: list[str]) -> dict[str, int]:
+        """Returns the maximum step currently in the database for the given runs."""
+        if not run_names:
+            return {}
+        placeholders = ",".join(["?"] * len(run_names))
+        res = self.db.q(
+            f"SELECT run_name, MAX(step) as max_step FROM metrics WHERE run_name IN ({placeholders}) GROUP BY run_name", run_names
+        )
+        return {r["run_name"]: r["max_step"] for r in res}
+
+    def fetch_new_metrics(self, run_states: dict[str, int]) -> dict[str, pd.DataFrame]:
+        """Fetches newly inserted metrics strictly after the known step, and merges them into the cache."""
+        if not run_states:
+            return {}
+
+        conds = " OR ".join(["(run_name = ? AND step > ?)"] * len(run_states))
+        params = []
+        for r, s in run_states.items():
+            params.extend([r, s])
+
+        raw = self.db.q(f"SELECT run_name, step, metrics FROM metrics WHERE {conds}", params)
+        if not raw:
+            return {}
+
+        new_dfs = process_metrics_to_dict(raw)
+        updated_runs = {}
+        for run, new_df in new_dfs.items():
+            if run in self._cache:
+                combined = pd.concat([self._cache[run], new_df])
+                self._cache[run] = combined[~combined.index.duplicated(keep="last")].sort_index()
+            else:
+                self._cache[run] = new_df
+            updated_runs[run] = self._cache[run]
+
+        return updated_runs
+
 
 def process_metrics_to_dict(raw_metrics) -> dict[str, pd.DataFrame]:
     """

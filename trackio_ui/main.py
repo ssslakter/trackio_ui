@@ -73,7 +73,8 @@ headers = [
 
 
 databases = {}
-sse_run_queues: dict[str, Queue] = {}
+project_state = {}
+
 app, rt = fast_app(
     hdrs=headers,
     static_path=files("trackio_ui"),
@@ -140,6 +141,14 @@ def delete_runs_endpoint(project_name: str, selected_runs: list[str]):
     return RunsTable(project_name, db.get_runs(names_only=False))
 
 
+@rt("/{project_name}/sse_toggle")
+def sse_toggle(project_name: str, req: Request):
+    query = dict(req.query_params)
+    if query.get("live-update-toggle") == "on":
+        return SSEListener(project_name)
+    return ""
+
+
 @rt("/{project_name}")
 def project_dashboard(project_name: str):
     db = get_db(project_name)
@@ -201,8 +210,21 @@ def project_dashboard(project_name: str):
         cls="flex flex-col flex-1 min-h-0",
     )
 
+    live_update_toggle = Div(
+        LabeledCheckbox(
+            "Live Updates",
+            "live-update-toggle",
+            cls_colors="checkbox-accent",
+            hx_get=sse_toggle.to(project_name=project_name),
+            hx_target="#sse-wrapper",
+            hx_swap="innerHTML",
+        ),
+        cls="pb-2 pt-1",
+    )
+
     controls_section = SidebarSection(
         controls_form,
+        live_update_toggle,
         runs_form,
         cls="flex flex-col min-h-0 overflow-hidden",
     )
@@ -242,7 +264,7 @@ def project_dashboard(project_name: str):
         main_content,
         Script("{}", type="application/json", id="chart-data-payload"),
         ChartModal(),
-        SSEListener(project_name) if False else None,
+        Div(id="sse-wrapper"),
         cls="flex flex-1 min-h-0",
         id="layout-wrapper",
         style="--sidebar-width: 300px;",
@@ -269,8 +291,7 @@ def get_charts(
     db = get_db(project_name)
     runs = runs or []
     filtered_runs = [r for r in db.get_runs() if r in runs]
-    if project_name in sse_run_queues:
-        sse_run_queues[project_name].put_nowait(filtered_runs)
+    project_state[project_name] = {"runs": filtered_runs, "smoothing": smoothing, "max_points": max_points}
     metrics, new_schema = db.get_metrics_and_schema(filtered_runs)
     data = prepare_metrics(metrics, smoothing=smoothing, max_points=max_points)
     schema_changed = set(current_schema or []) != set(new_schema)
@@ -288,19 +309,52 @@ shutdown_event = signal_shutdown()
 
 async def live_generator(project_name: str):
     db = get_db(project_name)
-    q: Queue = Queue()
-    sse_run_queues[project_name] = q
-    current_runs: list[str] = []
+    run_states = {}
+    run_active_ticks = {}
+    tick_count = 0
+
     try:
         while not shutdown_event.is_set():
-            while not q.empty():
-                current_runs = q.get_nowait()
-            if current_runs:
-                data = db.get_metrics(current_runs, refresh=True)
-                yield sse_json({"data": prepare_metrics(data, 0.5, 10_000)}, event="data_update")
-            await asyncio.sleep(3)
+            state = project_state.get(project_name, {})
+            current_runs = state.get("runs", [])
+            smoothing = state.get("smoothing", 0.0)
+            max_points = state.get("max_points", 0)
+
+            run_states = {r: run_states.get(r, -1) for r in current_runs}
+            run_active_ticks = {r: run_active_ticks.get(r, 0) for r in current_runs}
+
+            runs_to_check = []
+            for r in current_runs:
+                ticks_idle = run_active_ticks.get(r, 0)
+                if ticks_idle < 5 or tick_count % 15 == 0:
+                    runs_to_check.append(r)
+
+            if runs_to_check:
+                max_steps = await asyncio.to_thread(db.get_max_steps, runs_to_check)
+
+                runs_to_fetch = {}
+                for r in runs_to_check:
+                    m_step = max_steps.get(r, -1)
+                    if m_step > run_states.get(r, -1):
+                        runs_to_fetch[r] = run_states.get(r, -1)
+                    else:
+                        run_active_ticks[r] = run_active_ticks.get(r, 0) + 1
+
+                if runs_to_fetch:
+                    updated_dfs = await asyncio.to_thread(db.fetch_new_metrics, runs_to_fetch)
+
+                    for r in updated_dfs.keys():
+                        run_states[r] = max_steps.get(r, run_states.get(r, -1))
+                        run_active_ticks[r] = 0
+
+                    if updated_dfs:
+                        prepared = await asyncio.to_thread(prepare_metrics, updated_dfs, smoothing, max_points)
+                        yield sse_json({"data": prepared}, event="data_update")
+
+            tick_count += 1
+            await asyncio.sleep(2)
     finally:
-        sse_run_queues.pop(project_name, None)
+        pass
 
 
 @rt("/{project_name}/live")
