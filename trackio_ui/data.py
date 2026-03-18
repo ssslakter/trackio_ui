@@ -12,12 +12,7 @@ class TrackioDatabase:
         self.db_path = Path(root / f"{project_name}.db").expanduser()
         self.db = database(self.db_path)
         self._cache = {}
-        self._send_schema = False
-        self.selected_runs = []
 
-    def set_selected_runs(self, run_names: list[str]):
-        self.selected_runs = run_names
-    
     def clear_cache(self):
         """Clears the in-memory cache."""
         self._cache.clear()
@@ -47,42 +42,23 @@ class TrackioDatabase:
             return []
         return self.db.t.metrics(f"run_name in ({','.join(['?'] * len(run_names))})", run_names)
 
-    def get_metrics(self, run_names: Union[list[str], str, None] = None, refresh: bool = True) -> dict:
-        """
-        Returns a dict of metrics.
-        Checks cache first, only fetches missing runs from DB.
-
-        :param refresh: If True, ignores cache and re-fetches specified runs from DB.
-        """
-        run_names = run_names or self.selected_runs
-        if self._send_schema: # this allows for cheap retrieval of metric after user fetched schema (with metrics), without hitting DB again
-            self._send_schema = False
-            return self.metrics
-        if run_names is None:
-            all_configs = self.get_runs()
-            run_names = [c["run_name"] for c in all_configs]
-        elif isinstance(run_names, str):
+    def get_metrics(self, run_names: list[str], refresh: bool = True) -> dict:
+        if isinstance(run_names, str):
             run_names = [run_names]
-
         missing_runs = run_names if refresh else [r for r in run_names if r not in self._cache]
-
         if missing_runs:
             raw_metrics = self.get_metrics_raw(missing_runs)
             if raw_metrics:
-                new_dfs = process_metrics_to_dict(raw_metrics)
-                self._cache.update(new_dfs)
+                self._cache.update(process_metrics_to_dict(raw_metrics))
+        return {k: self._cache[k] for k in run_names if k in self._cache}
 
-        return {k: self._cache[k] for k in run_names}
-
-    def get_metrics_schema(self, run_names: Union[list[str], str, None] = None) -> list[str]:
-        """Returns a list of all metric paths for the specified runs."""
-        run_names = run_names or self.selected_runs
-        self.metrics = metrics = self.get_metrics(run_names)
-        self._send_schema = True
+    def get_metrics_and_schema(self, run_names: list[str], refresh: bool = True) -> tuple[dict, list[str]]:
+        """Fetches metrics and returns (metrics_dict, column_names) in one DB hit."""
+        metrics = self.get_metrics(run_names, refresh=refresh)
         if not metrics:
-            return []
-        first_df = next(iter(metrics.values()))
-        return first_df.columns.tolist()
+            return metrics, []
+        schema = next(iter(metrics.values())).columns.tolist()
+        return metrics, schema
 
 
 def process_metrics_to_dict(raw_metrics) -> dict[str, pd.DataFrame]:

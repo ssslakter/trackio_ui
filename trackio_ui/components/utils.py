@@ -21,10 +21,31 @@ def ProjectHeader(project_name, active_tab="dashboard"):
     )
 
 
-def SSEListener(project_name: str, active: bool = False):
+def SliderInput(name, label, min="0", max="1", step="0.01", default="0.5", **kwargs):
+    return Div(
+        Label(label, fr=name, cls="uk-form-label"),
+        Div(
+            Input(
+                type="range",
+                name=name,
+                id=name,
+                min=min,
+                max=max,
+                step=step,
+                x_init="$el.value = val",
+                cls="uk-range w-full",
+                **{"@input": f"val = $el.value; localStorage.setItem('{name}', val)"},
+            ),
+            Span(x_text="parseFloat(val).toFixed(2)", cls="text-sm text-muted-foreground tabular-nums"),
+        ),
+        x_data=f"{{val: parseFloat(localStorage.getItem('{name}') ?? '{default}')}}",
+        **kwargs,
+    )
+
+
+def SSEListener(project_name: str):
     from trackio_ui.main import live_stream
-    if not active:
-        return Div(id="sse-root")
+
     return Div(
         id="sse-root",
         hx_ext="sse",

@@ -1,6 +1,7 @@
 from importlib.resources import files
 from datetime import datetime
 import asyncio
+from asyncio import Queue
 import json, orjson, tempfile, click
 from pathlib import Path
 from fasthtml.common import *
@@ -38,6 +39,7 @@ headers = [
 
 
 databases = {}
+sse_run_queues: dict[str, Queue] = {}
 app, rt = fast_app(
     hdrs=headers,
     static_path=files("trackio_ui"),
@@ -95,41 +97,36 @@ def runs_table_view(project_name: str):
 
 
 @rt("/{project_name}/delete_runs")
-def delete_runs_endpoint(project_name: str, selected_runs: list[str] | None = None):
+def delete_runs_endpoint(project_name: str, selected_runs: list[str]):
     if selected_runs:
         db = get_db(project_name)
         db.delete_runs(selected_runs)
-
+    runs = db.get_runs()
     return RunsTable(project_name, db.get_runs(names_only=False))
 
 
 @rt("/{project_name}")
-def project_dashboard(project_name: str, selected_runs: str | None = None):
+def project_dashboard(project_name: str):
     db = get_db(project_name)
     runs = db.get_runs()
-    selected_runs = selected_runs.split(",") if selected_runs else []
-    db.set_selected_runs(selected_runs)
 
     # Sidebar Construction
     sidebar_header = SidebarSection(
         None,
         H3(project_name, cls="font-bold text-lg text-primary truncate"),
-        P("Trainer Tools", cls="text-xs text-muted-foreground"),
         Details(Summary("change theme"), ThemePicker()),
         cls="justify-center shrink-0",
     )
-
-    controls = SidebarSection(
+    main_id = "#main-content"
+    controls_form = Form(
         H3("Controls"),
-        LabelRange(
-            label="Smoothing",
+        SliderInput(
             name="smoothing",
+            label="Smoothing",
             min="0",
             max="0.99",
             step="0.01",
-            x_data=f"{{val: parseFloat(localStorage.getItem('smoothing') ?? '0.5')}}",
-            x_init="$el.setAttribute('value', val)",
-            **{"@uk-input-range:input.window": "localStorage.setItem('smoothing', $event.detail.value)"},
+            default="0.5",
             cls="space-y-2",
         ),
         LabelInput(
@@ -138,19 +135,42 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
             type="number",
             x_data="{val: $persist('100000').as('max_points')}",
             x_model="val",
+            **{"@keydown.enter.prevent": "$el.querySelector('input')?.blur() ?? $el.blur()"},
         ),
         Div(
-            LabeledCheckbox("log-x Axis", "log-x-axis", cls_colors="checkbox-secondary"),
-            LabeledCheckbox("log-y Axis", "log-y-axis", cls_colors="checkbox-secondary"),
+            LabeledCheckbox("log-x Axis", "log-x-axis", cls_colors="checkbox-secondary", x_model="logX"),
+            LabeledCheckbox("log-y Axis", "log-y-axis", cls_colors="checkbox-secondary", x_model="logY"),
             cls="flex flex-row flex-wrap gap-4 py-2",
-            **{"@change": "Charts.setLogAxes($el.querySelector('#log-x-axis').checked, $el.querySelector('#log-y-axis').checked)"},
+            x_data="{ logX: false, logY: false }",
+            **{"@change": "Charts.setLogAxes(logX, logY)"},
         ),
-        (runs_list := RunsListComponent(runs)),
+        id="controls-form",
+        hx_get=get_charts.to(project_name=project_name),
+        hx_trigger="change",
+        hx_swap="none",
+        hx_include="#runs-form",
         cls="flex flex-col flex-1 min-h-0",
     )
+    runs_list = RunsListComponent(runs)
+    runs_form = Form(
+        runs_list,
+        id="runs-form",
+        hx_get=get_charts.to(project_name=project_name),
+        hx_trigger="change delay:500ms, load",
+        hx_target=main_id,
+        hx_swap="innerHTML",
+        hx_include=f"#{controls_form.id}",
+    )
+
+    controls_section = SidebarSection(
+        controls_form,
+        runs_form,
+        cls="flex flex-col flex-1 min-h-0 overflow-y-auto",
+    )
+
     sidebar_footer = Div(
         Button(
-            "Refresh",
+            "Refresh runs",
             cls=(ButtonT.primary, "w-full", "mt-2"),
             hx_get=get_runs.to(project_name=project_name),
             hx_target=f"#{runs_list.id}",
@@ -161,14 +181,7 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
 
     sidebar = Aside(
         sidebar_header,
-        Form(
-            controls,
-            cls="flex flex-col flex-1 min-h-0 overflow-y-auto",
-            hx_get=get_layout.to(project_name=project_name),
-            hx_trigger="change delay:500ms, load",
-            hx_target="#main-content",
-            hx_swap="innerHTML",
-        ),
+        controls_section,
         sidebar_footer,
         id="sidebar",
         cls="h-full bg-card border-r flex flex-col shrink-0",
@@ -176,8 +189,8 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
     )
 
     main_content = Main(
-        ChartsContainer(db.get_metrics_schema(runs)),
-        id="main-content",
+        Div("Loading", id="charts-container"),
+        id=main_id[1:],
         cls="relative flex-1 min-w-0 overflow-y-auto p-6 pr-8 bg-muted/10",
     )
 
@@ -185,7 +198,8 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
         sidebar,
         ResizeHandle(),
         main_content,
-        SSEListener(project_name, active=True),
+        Div(id="chart-data-payload"),
+        SSEListener(project_name) if False else None,
         cls="flex flex-1 min-h-0",
         id="layout-wrapper",
         style="--sidebar-width: 300px;",
@@ -202,33 +216,26 @@ def project_dashboard(project_name: str, selected_runs: str | None = None):
 
 
 @rt("/{project_name}/layout")
-def get_layout(project_name: str, runs: list[str] | None = None):
-    db = get_db(project_name)
-    runs = runs or []
-    filtered_runs = [r for r in db.get_runs() if r in runs]
-    db.set_selected_runs(filtered_runs)
-    ck = cookie("selected_runs", filtered_runs, path=f"/{project_name}")
-    return ChartsContainer(db.get_metrics_schema()), ck
-
-
-@rt("/{project_name}/data")
-def get_data(
+def get_charts(
     project_name: str,
     runs: list[str] | None = None,
     smoothing: float = 0.0,
     max_points: int = 0,
-    refresh: bool = False,
+    current_schema: list[str] | None = None,
 ):
-    if not runs:
-        return json.dumps({"data": {}})
-
     db = get_db(project_name)
-    raw_data = db.get_metrics(runs, refresh=bool(refresh))
-    resp = orjson.dumps(
-        {"data": prepare_metrics(raw_data, smoothing, max_points)},
-        option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS,
-    )
-    return Response(content=resp, media_type="application/json")
+    runs = runs or []
+    filtered_runs = [r for r in db.get_runs() if r in runs]
+    if project_name in sse_run_queues:
+        sse_run_queues[project_name].put_nowait(filtered_runs)
+    metrics, new_schema = db.get_metrics_and_schema(filtered_runs)
+    data = prepare_metrics(metrics, smoothing=smoothing, max_points=max_points)
+    data_json = orjson.dumps({"data": data, "runs": filtered_runs}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS).decode()
+    data_island = Script(data_json, type="application/json", id="chart-data-payload", hx_swap_oob="true")
+
+    if set(current_schema or []) == set(new_schema):
+        return data_island, HtmxResponseHeaders(reswap="none")
+    return ChartsContainer(new_schema), data_island
 
 
 shutdown_event = signal_shutdown()
@@ -236,17 +243,19 @@ shutdown_event = signal_shutdown()
 
 async def live_generator(project_name: str):
     db = get_db(project_name)
-    while not shutdown_event.is_set():
-        # TODO figure out what is going on
-        # new_paths = db.get_metrics_schema(runs)
-        # if new_paths:
-        #     html = to_xml(ChartsContainer(new_paths))
-        #     yield sse_message(html, event="layout_add")
-
-        data = db.get_metrics()
-        yield sse_json({"data": prepare_metrics(data, 0.5, 10_000)}, event="data_update")
-
-        await asyncio.sleep(3)
+    q: Queue = Queue()
+    sse_run_queues[project_name] = q
+    current_runs: list[str] = []
+    try:
+        while not shutdown_event.is_set():
+            while not q.empty():
+                current_runs = q.get_nowait()
+            if current_runs:
+                data = db.get_metrics(current_runs, refresh=True)
+                yield sse_json({"data": prepare_metrics(data, 0.5, 10_000)}, event="data_update")
+            await asyncio.sleep(3)
+    finally:
+        sse_run_queues.pop(project_name, None)
 
 
 @rt("/{project_name}/live")

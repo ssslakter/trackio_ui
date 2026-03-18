@@ -79,7 +79,6 @@ const Charts = (() => {
         }, { notMerge: true });
     }
 
-    // ECharts tooltip requires an HTML string — no way around this API
     function tooltipFormatter(params) {
         if (!params.length) return '';
         const rows = params
@@ -104,13 +103,28 @@ const Charts = (() => {
         resizeTimer = setTimeout(() => instances.forEach(c => c.resize()), 150);
     });
 
-    // Re-observe + render after any HTMX layout swap
-    document.addEventListener('htmx:afterSettle', () => { observeAll(); renderVisible(); });
-
+    document.addEventListener('htmx:afterSettle', () => {
+        observeAll();
+        const island = document.getElementById('chart-data-payload');
+        if (island) {
+            const { data, runs } = JSON.parse(island.textContent);
+            pruneRuns(runs);
+            ingestData(data);
+        } else {
+            renderVisible();
+        }
+    });
     // SSE data events
     document.addEventListener('charts:data', e => ingestData(e.detail));
 
-    return { observeAll, ingestData, pruneRuns, setLogAxes };
+    return { observeAll, ingestData, pruneRuns, setLogAxes, getCurrentSchema: () => [...instances.keys()] };
 })();
 
 document.addEventListener('DOMContentLoaded', Charts.observeAll);
+
+document.addEventListener('htmx:configRequest', e => {
+    if (!e.detail.path.includes('/layout')) return;
+    Charts.getCurrentSchema().forEach(path =>
+        e.detail.parameters.append('current_schema', path)
+    );
+});
