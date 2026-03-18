@@ -149,7 +149,7 @@ def project_dashboard(project_name: str):
         hx_trigger="change",
         hx_swap="none",
         hx_include="#runs-form",
-        cls="flex flex-col flex-1 min-h-0",
+        cls="flex flex-col shrink-0",
     )
     runs_list = RunsListComponent(runs)
     runs_form = Form(
@@ -160,12 +160,13 @@ def project_dashboard(project_name: str):
         hx_target=main_id,
         hx_swap="innerHTML",
         hx_include=f"#{controls_form.id}",
+        cls="flex flex-col flex-1 min-h-0",
     )
 
     controls_section = SidebarSection(
         controls_form,
         runs_form,
-        cls="flex flex-col flex-1 min-h-0 overflow-y-auto",
+        cls="flex flex-col flex-1 min-h-0",
     )
 
     sidebar_footer = Div(
@@ -176,7 +177,7 @@ def project_dashboard(project_name: str):
             hx_target=f"#{runs_list.id}",
             hx_swap="outerHTML",
         ),
-        cls="shrink-0 p-4 border-t",
+        cls="shrink-0 p-4 border-t bg-card",
     )
 
     sidebar = Aside(

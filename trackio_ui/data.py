@@ -135,14 +135,17 @@ def prepare_metrics(metrics: dict[str, pd.DataFrame], smoothing: float = 0, max_
             mask = ~np.isnan(vals)
             x = idx_np[mask]
             y = vals[mask]
+            if len(x) == 0:
+                continue
+
             if max_points != 0 and len(x) > max_points:
                 x, y = min_max_downsample(x, y, int(max_points))
 
             y = np.round(y, 6)
-
             run_entry[col] = {"x": x, "y": y}
 
-        processed_data[run_name] = run_entry
+        if run_entry:
+            processed_data[run_name] = run_entry
 
     return processed_data
 

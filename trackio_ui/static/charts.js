@@ -1,6 +1,8 @@
 const Charts = (() => {
     const instances = new Map();  // metricPath -> ECharts instance
     const dataCache = new Map();  // metricPath -> { runName: {x, y} }
+    const runColors = new Map();
+
     let logX = false, logY = false;
 
     // --- Observer ---
@@ -37,6 +39,17 @@ const Charts = (() => {
 
     // --- Rendering ---
 
+    function colorFor(run) {
+        if (!runColors.has(run)) {
+            const palette = echarts.theme?.default?.color ?? [
+                '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+                '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'
+            ];
+            runColors.set(run, palette[runColors.size % palette.length]);
+        }
+        return runColors.get(run);
+    }
+
     function renderVisible() {
         document.querySelectorAll('[data-metric]').forEach(el => {
             if (dataCache.has(el.dataset.metric)) renderChart(el);
@@ -53,14 +66,17 @@ const Charts = (() => {
             instances.set(path, c);
             return c;
         })();
-
+        const EPS = 1e-10;
         const series = Object.entries(dataCache.get(path) ?? {}).map(([run, { x, y }]) => ({
             name: run, type: 'line',
-            data: x.map((v, i) => [v, y[i]]),
+            data: x.map((v, i) => [
+                logX ? Math.max(EPS, v) : v,
+                logY ? Math.max(EPS, y[i]) : y[i],
+            ]),
             showSymbol: false, animation: false,
             lineStyle: { width: 1.5 },
+            itemStyle: { color: colorFor(run) },
         }));
-
         chart.setOption({
             animation: false,
             tooltip: {
@@ -69,13 +85,16 @@ const Charts = (() => {
                 formatter: tooltipFormatter,
             },
             grid: { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
-            xAxis: { type: logX ? 'log' : 'value', scale: true },
+            xAxis: { type: logX ? 'log' : 'value', scale: true, min: logX ? EPS : undefined },
             yAxis: {
-                type: logY ? 'log' : 'value', scale: true,
+                type: logY ? 'log' : 'value', scale: true, min: logY ? EPS : undefined,
                 splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } }
             },
             series,
-            legend: { bottom: 0, icon: 'circle', type: 'scroll', textStyle: { fontSize: 9 } },
+            legend: {
+                bottom: 0, icon: 'circle', type: 'scroll', textStyle: { fontSize: 9 },
+                data: series.map(s => ({ name: s.name, itemStyle: { color: colorFor(s.name) } })),
+            },
         }, { notMerge: true });
     }
 
@@ -113,6 +132,7 @@ const Charts = (() => {
         if (schema_changed) {
             instances.forEach(c => c.dispose());
             instances.clear();
+            runColors.clear();
         }
         pruneRuns(runs);
         ingestData(data);
