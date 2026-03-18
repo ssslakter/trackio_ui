@@ -200,18 +200,6 @@ def project_dashboard(project_name: str):
         cls="flex flex-col flex-1 min-h-0",
     )
 
-    runs_list = RunsListComponent(project_name, runs)
-    runs_form = Form(
-        runs_list,
-        id="runs-form",
-        hx_post=get_charts.to(project_name=project_name),
-        hx_trigger="change delay:500ms, load",
-        hx_target=main_id,
-        hx_swap="innerHTML",
-        hx_include=f"#{controls_form.id}",
-        cls="flex flex-col flex-1 min-h-0",
-    )
-
     controls_section = SidebarSection(
         controls_form,
         runs_form,
