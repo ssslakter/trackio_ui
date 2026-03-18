@@ -200,6 +200,7 @@ def project_dashboard(project_name: str):
         ResizeHandle(),
         main_content,
         Script("{}", type="application/json", id="chart-data-payload"),
+        ChartModal(),
         SSEListener(project_name) if False else None,
         cls="flex flex-1 min-h-0",
         id="layout-wrapper",

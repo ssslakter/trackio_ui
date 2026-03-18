@@ -1,4 +1,5 @@
 from fasthtml.common import *
+from monsterui.all import *
 
 MAX_DEPTH = 2
 
@@ -11,10 +12,26 @@ def ChartCard(path):
     return Div(
         P(path.split("/")[-1], title=path, cls="text-[10px] font-bold uppercase tracking-widest opacity-40 truncate mb-1"),
         Div(cls="chart-canvas w-full flex-1 min-h-0"),
+        Button(
+            UkIcon("maximize-2", height=13, width=13),
+            onclick=f"Charts.openModal('{path}')",
+            cls="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity btn btn-xs btn-ghost p-1",
+        ),
         id=f"chart-{_slug(path)}",
         data_metric=path,
-        cls="flex flex-col border rounded-lg p-3 h-64",
+        cls="relative group flex flex-col border rounded-lg p-3 h-64",
         style="contain:strict",
+    )
+
+
+def ChartModal():
+    """Single reusable modal for enlarged chart view. Render once in layout."""
+    return Modal(
+        Div(id="chart-modal-canvas", style="height:520px", cls="w-full"),
+        header=ModalTitle("", id="chart-modal-title"),
+        footer=ModalCloseButton("Close"),
+        id="chart-modal",
+        dialog_cls="uk-modal-dialog-large uk-margin-auto-vertical",
     )
 
 

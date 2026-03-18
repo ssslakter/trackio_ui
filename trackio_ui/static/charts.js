@@ -4,6 +4,7 @@ const Charts = (() => {
     const runColors = new Map();
 
     let logX = false, logY = false;
+    let modalInstance = null;
 
     // --- Observer ---
 
@@ -56,18 +57,10 @@ const Charts = (() => {
         });
     }
 
-    function renderChart(cardEl) {
-        const path = cardEl.dataset.metric;
-        const canvas = cardEl.querySelector('.chart-canvas');
-        if (!canvas) return;
-
-        const chart = instances.get(path) ?? (() => {
-            const c = echarts.init(canvas, null, { renderer: 'canvas' });
-            instances.set(path, c);
-            return c;
-        })();
+    // Shared series builder — used by both renderChart and openModal
+    function buildSeries(path) {
         const EPS = 1e-10;
-        const series = Object.entries(dataCache.get(path) ?? {}).map(([run, { x, y }]) => ({
+        return Object.entries(dataCache.get(path) ?? {}).map(([run, { x, y }]) => ({
             name: run, type: 'line',
             data: x.map((v, i) => [
                 logX ? Math.max(EPS, v) : v,
@@ -77,6 +70,21 @@ const Charts = (() => {
             lineStyle: { width: 1.5 },
             itemStyle: { color: colorFor(run) },
         }));
+    }
+
+    function renderChart(cardEl) {
+        const path = cardEl.dataset.metric;
+        const canvas = cardEl.querySelector('.chart-canvas');
+        if (!canvas) return;
+
+        const EPS = 1e-10;
+        const chart = instances.get(path) ?? (() => {
+            const c = echarts.init(canvas, null, { renderer: 'canvas' });
+            instances.set(path, c);
+            return c;
+        })();
+
+        const series = buildSeries(path);
         chart.setOption({
             animation: false,
             tooltip: {
@@ -107,11 +115,69 @@ const Charts = (() => {
         return `<small>${params[0].axisValueLabel}</small><br>${rows}`;
     }
 
+    // --- Modal ---
+
+    function openModal(path) {
+        if (!dataCache.has(path)) return;
+
+        document.getElementById('chart-modal-title').textContent = path;
+
+        if (modalInstance) { modalInstance.dispose(); modalInstance = null; }
+
+        // Init with explicit dimensions before showing so the chart is already
+        // drawn during the open animation — no empty-modal flash.
+        const canvas = document.getElementById('chart-modal-canvas');
+        const modalW = Math.min(window.innerWidth * 0.85, 1200) - 80;  // approx dialog width minus padding
+        modalInstance = echarts.init(canvas, null, { renderer: 'canvas', width: modalW, height: 520 });
+
+        const EPS = 1e-10;
+        const series = buildSeries(path);
+        modalInstance.setOption({
+            animation: false,
+            tooltip: {
+                trigger: 'axis', confine: true,
+                axisPointer: { type: 'line', animation: false },
+                formatter: tooltipFormatter,
+            },
+            grid: { left: '8%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
+            xAxis: { type: logX ? 'log' : 'value', scale: true, min: logX ? EPS : undefined },
+            yAxis: {
+                type: logY ? 'log' : 'value', scale: true, min: logY ? EPS : undefined,
+                splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } }
+            },
+            dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: '8%' }],
+            series,
+            legend: {
+                bottom: 0, icon: 'circle', type: 'scroll', textStyle: { fontSize: 9 },
+                data: series.map(s => ({ name: s.name, itemStyle: { color: colorFor(s.name) } })),
+            },
+        }, { notMerge: true });
+
+        UIkit.modal('#chart-modal').show();
+
+        // Correct any dimension mismatch once animation settles
+        document.getElementById('chart-modal').addEventListener('shown', () => {
+            modalInstance?.resize();
+        }, { once: true });
+    }
+
+    // Dispose when UIkit closes the modal (backdrop click, Escape, or Close button)
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('chart-modal')?.addEventListener('hidden', () => {
+            if (modalInstance) { modalInstance.dispose(); modalInstance = null; }
+        });
+    });
+
     // --- Settings ---
 
     function setLogAxes(x, y) {
         logX = x; logY = y;
         renderVisible();
+        // Re-render modal chart with updated axis type if open
+        if (modalInstance) {
+            const path = document.getElementById('chart-modal-title')?.textContent;
+            if (path) openModal(path);
+        }
     }
 
     // --- Resize ---
@@ -119,7 +185,10 @@ const Charts = (() => {
     let resizeTimer;
     window.addEventListener('resize', () => {
         clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => instances.forEach(c => c.resize()), 150);
+        resizeTimer = setTimeout(() => {
+            instances.forEach(c => c.resize());
+            modalInstance?.resize();
+        }, 150);
     });
 
     document.addEventListener('htmx:afterSettle', () => {
@@ -149,9 +218,9 @@ const Charts = (() => {
     document.addEventListener('charts:data', e => ingestData(e.detail));
 
     return {
-        observeAll, ingestData, pruneRuns, setLogAxes,
+        observeAll, ingestData, pruneRuns, setLogAxes, openModal,
         getCurrentSchema: () => [...instances.keys()],
-        resize: () => instances.forEach(c => c.resize())
+        resize: () => instances.forEach(c => c.resize()),
     };
 })();
 
