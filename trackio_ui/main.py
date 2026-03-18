@@ -83,11 +83,12 @@ app, rt = fast_app(
 )
 
 default_project = os.getenv("TRACKIO_DEFAULT_PROJECT", "")
+trackio_root = os.getenv("TRACKIO_ROOT", None)
 
 
 def get_db(project_name) -> TrackioDatabase:
     if project_name not in databases:
-        databases[project_name] = TrackioDatabase(project_name)
+        databases[project_name] = TrackioDatabase(project_name, trackio_root=trackio_root)
     return databases[project_name]
 
 
@@ -277,8 +278,7 @@ def get_charts(
         {"data": data, "runs": filtered_runs, "schema_changed": schema_changed}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
     ).decode()
     data_island = Script(data_json, type="application/json", id="chart-data-payload", hx_swap_oob="true")
-
-    if not schema_changed:
+    if not schema_changed and runs:
         return data_island, HtmxResponseHeaders(reswap="none")
     return ChartsContainer(new_schema), data_island
 
@@ -315,7 +315,7 @@ async def live_stream(project_name: str):
 def main(host, port, project):
     if project:
         os.environ["TRACKIO_DEFAULT_PROJECT"] = project
-    serve(host=host, port=port, reload=True, appname="trackio_ui.main")
+    serve(host=host, port=port, reload=False, appname="trackio_ui.main")
 
 
 if __name__ == "__main__":
