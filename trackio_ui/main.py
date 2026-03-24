@@ -68,6 +68,11 @@ headers = [
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
     }
+    
+    body.is-resizing * {
+        pointer-events: none !important;
+        user-select: none !important;
+    }
     """),
 ]
 

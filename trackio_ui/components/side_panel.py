@@ -54,6 +54,7 @@ def RunsListItems(runs_names: list[str], id="runs-list-inner"):
 def RunsListComponent(project_name: str, runs_names: list[str], id="runs-list-container"):
     """Outer container holding the header, buttons, and Alpine.js state."""
     from trackio_ui.main import get_runs
+
     alpine_data = "{ selected: $persist([]), allIds: [] }"
 
     header = Div(
@@ -99,6 +100,7 @@ def ResizeScript():
     return Script("""
 document.addEventListener('alpine:init', () => {
 Alpine.data('sidebarResize', () => ({
+    rafId: null,
     init() {
         const saved = localStorage.getItem('sidebarWidth');
         if (saved) {
@@ -112,18 +114,34 @@ Alpine.data('sidebarResize', () => ({
       const wrapper = document.getElementById('layout-wrapper');
       const startX = e.clientX;
       const startW = sidebar.offsetWidth;
+      
+      // Disables iframe / canvas pointer events globally
+      document.body.classList.add('is-resizing'); 
+      
       const onMove = (ev) => {
-        const maxW = Math.floor(window.innerWidth * 0.5);
-        const minW = Math.floor(window.innerWidth * 0.1);
-        const newW = Math.min(maxW, Math.max(minW, startW + ev.clientX - startX));
-        wrapper.style.setProperty('--sidebar-width', newW + 'px');
+        if (this.rafId) return; 
+        
+        // CSS-only update during drag (silky smooth)
+        this.rafId = requestAnimationFrame(() => {
+            const maxW = Math.floor(window.innerWidth * 0.5);
+            const minW = Math.floor(window.innerWidth * 0.1);
+            const newW = Math.min(maxW, Math.max(minW, startW + ev.clientX - startX));
+            wrapper.style.setProperty('--sidebar-width', newW + 'px');
+            this.rafId = null;
+        });
       };
+      
       const onUp = () => {
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
+        document.body.classList.remove('is-resizing');
+        
         localStorage.setItem('sidebarWidth', wrapper.style.getPropertyValue('--sidebar-width'));
-        if (typeof Charts !== 'undefined') Charts.resize();
+        
+        // Heavy lifting only happens once the user drops the panel
+        if (typeof Charts !== 'undefined') Charts.resize(); 
       };
+      
       document.addEventListener('pointermove', onMove, { passive: true });
       document.addEventListener('pointerup', onUp);
     }

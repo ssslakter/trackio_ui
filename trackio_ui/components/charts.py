@@ -26,7 +26,7 @@ def ChartCard(path: str):
         id=f"chart-{_slug(path)}",
         data_metric=path,
         cls="relative group flex flex-col p-2 h-64 uk-card shadow-none",
-        style="contain:strict",
+        style="contain: content; content-visibility: auto; contain-intrinsic-size: auto 256px;",
     )
 
 
@@ -53,6 +53,7 @@ def GroupPanel(*content, label: str, id: str, open: bool = True, card: bool = Fa
         open=open,
         id=id,
         cls=panel_cls,
+        style="contain: content;",
     )
 
 

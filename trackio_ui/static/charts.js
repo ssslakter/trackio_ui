@@ -1,20 +1,23 @@
 const Charts = (() => {
-    const instances = new Map();    // metricPath -> ECharts instance
-    const dataCache = new Map();    // metricPath -> { runName: {x, y, ts?} }
+    // --- State ---
+    const instances = new Map();     // path -> ECharts instance
+    const dataCache = new Map();     // path -> { runName: {x, y, ts?} }
     const runColors = new Map();
-    const visibleCharts = new Set();   // Keep track of visible charts
-    const renderedSchema = new Set();  // tracks what's currently rendered
 
-    // Paths that always use a time x-axis (system/* metrics).
+    const visiblePaths = new Set();  // Paths currently in the viewport
+    const pendingRenders = new Set(); // Paths that need a setOption update
+
+    // Asynchronous render queue to prevent scroll lag
+    const renderQueue = new Set();
+    let isProcessingQueue = false;
+
     const timeAxisPaths = new Set();
-    // Paths that have optional timestamps alongside steps (normal metrics with "ts").
     const tsOptionalPaths = new Set();
 
     let logX = false, logY = false, useTime = false;
     let modalInstance = null;
 
-    // --- Theme helpers ---
-
+    // --- Theme & Sizing Helpers ---
     function cssColor(varName, fallback) {
         const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
         return v ? `hsl(${v})` : fallback;
@@ -33,38 +36,20 @@ const Charts = (() => {
     }
 
     let currentTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+    let currentFont = document.documentElement.classList.contains('uk-font-base');
+
     new MutationObserver(() => {
         const newTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-        if (newTheme !== currentTheme) {
+        const newFont = document.documentElement.classList.contains('uk-font-base');
+
+        if (newTheme !== currentTheme || newFont !== currentFont) {
             currentTheme = newTheme;
-            renderVisible();
-            if (modalInstance) {
-                const path = document.getElementById('chart-modal-title')?.textContent;
-                if (path) openModal(path);
-            }
+            currentFont = newFont;
+            flagAllForRender(); // Theme/font change requires full redraw
         }
     }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
-    // --- Observer (lazy render) ---
-
-    const observer = new IntersectionObserver(entries => {
-        entries.forEach(({ target, isIntersecting }) => {
-            const path = target.dataset.metric;
-            if (isIntersecting) {
-                visibleCharts.add(path);
-                if (dataCache.has(path)) renderChart(target);
-            } else {
-                visibleCharts.delete(path);
-            }
-        });
-    }, { rootMargin: '120px' });
-
-    function observeAll() {
-        document.querySelectorAll('[data-metric]').forEach(el => observer.observe(el));
-    }
-
-    // --- Formatter ---
-
+    // --- Formatters ---
     function formatDuration(sec) {
         if (sec == null || isNaN(sec)) return '';
         const isNeg = sec < 0;
@@ -72,29 +57,154 @@ const Charts = (() => {
         const h = Math.floor(sec / 3600);
         const m = Math.floor((sec % 3600) / 60);
         const s = sec < 60 ? (sec % 60).toFixed(1) : Math.floor(sec % 60);
-
-        let res = '';
-        if (h > 0) res = `${h}h ${m}m`;
-        else if (m > 0) res = `${m}m ${Math.floor(sec % 60)}s`;
-        else res = `${s}s`;
-
+        let res = (h > 0) ? `${h}h ${m}m` : (m > 0) ? `${m}m ${Math.floor(sec % 60)}s` : `${s}s`;
         return isNeg ? "-" + res : res;
     }
 
-    // --- Data ---
+    function buildTooltip(params, useTimeAxis) {
+        if (!params.length) return '';
+        const val = params[0].value?.[0];
+        const label = (useTimeAxis && val != null) ? formatDuration(val) : params[0].axisValueLabel;
+        const rows = params.filter(p => p.value?.[1] != null)
+            .map(p => `${p.marker} ${p.seriesName}: <b>${p.value[1].toFixed(4)}</b>`).join('<br>');
+        return `<small>${label}</small><br>${rows}`;
+    }
 
+    // --- Render Chunking (Fixes Scroll "Teleportation" Lag) ---
+    function processQueue() {
+        if (renderQueue.size === 0) {
+            isProcessingQueue = false;
+            return;
+        }
+
+        let processed = 0;
+        const batchSize = 3; // Number of charts to render per frame (keeps UI at 60fps)
+
+        for (const path of renderQueue) {
+            renderQueue.delete(path);
+
+            // Only process if it's STILL in the viewport
+            if (visiblePaths.has(path)) {
+                // Ensure the width is accurate before we render
+                const chart = instances.get(path);
+                if (chart) chart.resize();
+
+                if (pendingRenders.has(path) && dataCache.has(path)) {
+                    renderChart(path);
+                }
+            }
+
+            processed++;
+            if (processed >= batchSize) break;
+        }
+
+        if (renderQueue.size > 0) {
+            requestAnimationFrame(processQueue);
+        } else {
+            isProcessingQueue = false;
+        }
+    }
+
+    function queueForRender(path) {
+        renderQueue.add(path);
+        if (!isProcessingQueue) {
+            isProcessingQueue = true;
+            requestAnimationFrame(processQueue);
+        }
+    }
+
+    // --- Visibility Observer ---
+    const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            const path = entry.target.dataset.metric;
+            if (entry.isIntersecting) {
+                visiblePaths.add(path);
+                queueForRender(path);
+            } else {
+                visiblePaths.delete(path);
+                // If user scrolls past quickly, cancel the queued render to save CPU
+                renderQueue.delete(path);
+            }
+        });
+    }, { rootMargin: '300px' });
+
+    function observeAll() {
+        document.querySelectorAll('[data-metric]').forEach(el => observer.observe(el));
+    }
+
+    // --- Core Rendering Logic ---
+    function renderChart(path) {
+        const cardEl = document.querySelector(`[data-metric="${path}"]`);
+        const canvas = cardEl?.querySelector('.chart-canvas');
+
+        // Prevent initialization if the canvas is inside a collapsed accordion folder
+        if (!canvas || canvas.clientWidth < 50) {
+            pendingRenders.add(path);
+            return;
+        }
+
+        pendingRenders.delete(path);
+
+        let chart = instances.get(path);
+        if (!chart) {
+            chart = echarts.init(canvas, null, { renderer: 'canvas' });
+            instances.set(path, chart);
+        }
+
+        chart.resize();
+
+        const options = buildChartOptions(buildSeries(path), themeColors(), path);
+        chart.setOption(options, { notMerge: true });
+    }
+
+    function flagAllForRender() {
+        for (const path of dataCache.keys()) {
+            if (visiblePaths.has(path)) {
+                queueForRender(path);
+            } else {
+                pendingRenders.add(path);
+            }
+        }
+        if (modalInstance) {
+            const title = document.getElementById('chart-modal-title')?.textContent;
+            if (title && dataCache.has(title)) renderModal(title);
+        }
+    }
+
+    // --- Fast Resize (Window / Sidebar Drag) ---
+    function resizeVisible() {
+        for (const path of visiblePaths) {
+            const chart = instances.get(path);
+            if (chart) chart.resize();
+
+            // If the chart was skipped due to 0-width previously, queue it now
+            if (pendingRenders.has(path) && dataCache.has(path)) {
+                queueForRender(path);
+            }
+        }
+        if (modalInstance) modalInstance.resize();
+    }
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(resizeVisible, 100);
+    });
+
+    document.addEventListener('toggle', (e) => {
+        if (e.target.tagName === 'DETAILS' && e.target.open) {
+            setTimeout(resizeVisible, 50);
+        }
+    }, true);
+
+    // --- Data Management ---
     function getCurrentSchema() {
-        return Array.from(document.querySelectorAll('[data-metric]'))
-            .map(el => el.dataset.metric);
+        return Array.from(document.querySelectorAll('[data-metric]')).map(el => el.dataset.metric);
     }
 
     function ingestAxisMetadata(raw) {
-        if (raw.time_axis_paths) {
-            for (const p of raw.time_axis_paths) timeAxisPaths.add(p);
-        }
-        if (raw.ts_optional_paths) {
-            for (const p of raw.ts_optional_paths) tsOptionalPaths.add(p);
-        }
+        if (raw.time_axis_paths) raw.time_axis_paths.forEach(p => timeAxisPaths.add(p));
+        if (raw.ts_optional_paths) raw.ts_optional_paths.forEach(p => tsOptionalPaths.add(p));
     }
 
     function ingestData(payload, isLive = false) {
@@ -107,45 +217,46 @@ const Charts = (() => {
                     needsLayoutRefresh = true;
                 }
 
-                if (!dataCache.get(path)) dataCache.set(path, {});
+                if (!dataCache.has(path)) dataCache.set(path, {});
                 dataCache.get(path)[run] = series;
+
+                if (visiblePaths.has(path)) {
+                    queueForRender(path);
+                } else {
+                    pendingRenders.add(path);
+                }
             }
         }
 
-        if (needsLayoutRefresh) {
+        if (isLive && needsLayoutRefresh) {
             document.getElementById('main-refresh-btn')?.click();
-        } else {
-            renderVisible();
+        } else if (modalInstance) {
+            const title = document.getElementById('chart-modal-title')?.textContent;
+            if (title && dataCache.has(title)) renderModal(title);
         }
     }
 
     function pruneRuns(activeRuns) {
         const active = new Set(activeRuns);
         for (const [path, runs] of dataCache.entries()) {
-            for (const run of Object.keys(runs))
+            for (const run of Object.keys(runs)) {
                 if (!active.has(run)) delete runs[run];
+            }
             if (!Object.keys(runs).length) dataCache.delete(path);
         }
     }
 
-    // --- Rendering ---
-
+    // --- Chart Building ---
     function colorFor(run) {
         if (!runColors.has(run)) {
-            const palette = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
-                '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
+            const palette = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
             runColors.set(run, palette[runColors.size % palette.length]);
         }
         return runColors.get(run);
     }
 
-    /**
-     * Returns true if this path should render its x-axis as wall-clock duration time.
-     */
     function isTimeAxis(path) {
-        if (timeAxisPaths.has(path)) return true;
-        if (useTime && tsOptionalPaths.has(path)) return true;
-        return false;
+        return timeAxisPaths.has(path) || (useTime && tsOptionalPaths.has(path));
     }
 
     function buildSeries(path) {
@@ -154,7 +265,13 @@ const Charts = (() => {
 
         return Object.entries(dataCache.get(path) ?? {}).map(([run, series]) => {
             const { x, y, ts } = series;
-            const xData = (useTimeAxis && ts) ? ts : x;
+
+            let xData = x;
+            if (useTimeAxis) {
+                if (timeAxisPaths.has(path)) xData = x;
+                else if (ts) xData = ts;
+                else xData = []; // Don't plot step data against a time axis
+            }
 
             const data = xData.map((v, i) => [
                 logX ? Math.max(EPS, v) : v,
@@ -162,8 +279,7 @@ const Charts = (() => {
             ]);
 
             return {
-                name: run, type: 'line',
-                data,
+                name: run, type: 'line', data,
                 showSymbol: false, animation: false,
                 lineStyle: { width: 1.5 },
                 itemStyle: { color: colorFor(run) },
@@ -180,7 +296,7 @@ const Charts = (() => {
             tooltip: {
                 trigger: 'axis', confine: true,
                 axisPointer: { type: 'line', animation: false },
-                formatter: useTimeAxis ? timeTooltipFormatter : tooltipFormatter,
+                formatter: (params) => buildTooltip(params, useTimeAxis),
                 backgroundColor: colors.tooltipBg,
                 borderColor: colors.tooltipBorder,
                 textStyle: { color: colors.text, fontSize: 12 },
@@ -207,81 +323,27 @@ const Charts = (() => {
         return opts;
     }
 
-    function tooltipFormatter(params) {
-        if (!params.length) return '';
-        const rows = params
-            .filter(p => p.value?.[1] != null)
-            .map(p => `${p.marker} ${p.seriesName}: <b>${p.value[1].toFixed(4)}</b>`)
-            .join('<br>');
-        return `<small>${params[0].axisValueLabel}</small><br>${rows}`;
-    }
-
-    function timeTooltipFormatter(params) {
-        if (!params.length) return '';
-        const val = params[0].value?.[0];
-        const label = val != null ? formatDuration(val) : params[0].axisValueLabel;
-        const rows = params
-            .filter(p => p.value?.[1] != null)
-            .map(p => `${p.marker} ${p.seriesName}: <b>${p.value[1].toFixed(4)}</b>`)
-            .join('<br>');
-        return `<small>${label}</small><br>${rows}`;
-    }
-
-    function renderVisible() {
-        document.querySelectorAll('[data-metric]').forEach(el => {
-            const path = el.dataset.metric;
-            if (visibleCharts.has(path) && dataCache.has(path)) {
-                renderChart(el);
-            }
-        });
-
-        if (modalInstance) {
-            const modalTitleEl = document.getElementById('chart-modal-title');
-            const path = modalTitleEl ? modalTitleEl.textContent : null;
-            if (path && dataCache.has(path)) {
-                modalInstance.setOption({
-                    series: buildSeries(path)
-                });
-            }
-        }
-    }
-
-    function renderChart(cardEl) {
-        const path = cardEl.dataset.metric;
-        const canvas = cardEl.querySelector('.chart-canvas');
-        if (!canvas) return;
-        let chart = instances.get(path);
-        if (!chart) {
-            chart = echarts.init(canvas, null, { renderer: 'canvas' });
-            instances.set(path, chart);
-        }
-        chart.setOption(
-            buildChartOptions(buildSeries(path), themeColors(), path),
-            { notMerge: true }
-        );
-    }
-
     // --- Modal ---
+    function renderModal(path) {
+        modalInstance.setOption(buildChartOptions(buildSeries(path), themeColors(), path, {
+            grid: { left: '8%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
+            dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: '8%' }],
+        }), { notMerge: true });
+    }
 
     function openModal(path) {
         if (!dataCache.has(path)) return;
         document.getElementById('chart-modal-title').textContent = path;
 
-        const canvas = document.getElementById('chart-modal-canvas');
         if (!modalInstance) {
+            const canvas = document.getElementById('chart-modal-canvas');
             const modalW = Math.min(window.innerWidth * 0.85, 1200) - 80;
             modalInstance = echarts.init(canvas, null, { renderer: 'canvas', width: modalW, height: 520 });
         }
 
-        modalInstance.setOption(
-            buildChartOptions(buildSeries(path), themeColors(), path, {
-                grid: { left: '8%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
-                dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: '8%' }],
-            }),
-            { notMerge: true }
-        );
-
+        renderModal(path);
         UIkit.modal('#chart-modal').show();
+
         document.getElementById('chart-modal').addEventListener('shown', () => {
             modalInstance?.resize();
         }, { once: true });
@@ -296,68 +358,46 @@ const Charts = (() => {
         });
     });
 
-    // --- Settings ---
-
-    function setAxes(x, y, t) {
-        logX = x; logY = y; useTime = t;
-        renderVisible();
-        if (modalInstance) {
-            const path = document.getElementById('chart-modal-title')?.textContent;
-            if (path) openModal(path);
-        }
-    }
-
-    // --- Resize ---
-
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            instances.forEach(c => c.resize());
-            modalInstance?.resize();
-        }, 150);
-    });
-
+    // --- Initialization & HTMX Hooks ---
     document.addEventListener('htmx:afterSettle', (e) => {
-        const targetEl = e.target;
-        if (targetEl && targetEl.querySelectorAll) {
-            targetEl.querySelectorAll('[data-metric]').forEach(el => observer.observe(el));
+        if (e.target?.querySelectorAll) {
+            e.target.querySelectorAll('[data-metric]').forEach(el => observer.observe(el));
         }
 
         const island = document.getElementById('chart-data-payload');
-
         if (!island || island.dataset.processed) return;
         island.dataset.processed = "true";
 
-        const raw = JSON.parse(island.textContent);
-        if (!raw.data) return;
-        const { data, runs, schema_changed } = raw;
+        setTimeout(() => {
+            const raw = JSON.parse(island.textContent);
+            if (!raw.data) return;
+            const { data, runs, schema_changed } = raw;
 
-        ingestAxisMetadata(raw);
+            ingestAxisMetadata(raw);
 
-        if (schema_changed) {
-            instances.forEach(c => c.dispose());
-            instances.clear();
-            runColors.clear();
-            visibleCharts.clear();
-            renderedSchema.clear();
-            observer.disconnect();
-            observeAll();
-        }
-        for (const [run, metrics] of Object.entries(data)) {
-            for (const path of Object.keys(metrics)) {
-                renderedSchema.add(path);
+            if (schema_changed) {
+                instances.forEach(c => c.dispose());
+                instances.clear();
+                runColors.clear();
+                visiblePaths.clear();
+                pendingRenders.clear();
+                renderQueue.clear();
+                observer.disconnect();
+                observeAll();
             }
-        }
-        pruneRuns(runs);
-        ingestData(data);
+
+            pruneRuns(runs);
+            ingestData(data);
+        }, 0);
     });
 
     document.addEventListener('htmx:beforeSwap', e => {
         if (e.detail.target.id === 'main-content') {
             instances.forEach(c => c.dispose());
             instances.clear();
-            visibleCharts.clear();
+            visiblePaths.clear();
+            pendingRenders.clear();
+            renderQueue.clear();
             observer.disconnect();
         }
     });
@@ -369,9 +409,9 @@ const Charts = (() => {
     });
 
     return {
-        observeAll, ingestData, pruneRuns, setAxes, openModal,
-        getCurrentSchema,
-        resize: () => instances.forEach(c => c.resize()),
+        observeAll, ingestData, pruneRuns, openModal, getCurrentSchema,
+        setAxes: (x, y, t) => { logX = x; logY = y; useTime = t; flagAllForRender(); },
+        resize: resizeVisible,
     };
 })();
 
