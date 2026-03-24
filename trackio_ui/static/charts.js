@@ -105,6 +105,12 @@ const Charts = (() => {
         }
     }
 
+    function clearQueue() {
+        renderQueue.clear();
+        pendingRenders.clear();
+        isProcessingQueue = false;
+    }
+
     function queueForRender(path) {
         renderQueue.add(path);
         if (!isProcessingQueue) {
@@ -409,7 +415,7 @@ const Charts = (() => {
     });
 
     return {
-        observeAll, ingestData, pruneRuns, openModal, getCurrentSchema,
+        observeAll, ingestData, pruneRuns, openModal, getCurrentSchema, clearQueue,
         setAxes: (x, y, t) => { logX = x; logY = y; useTime = t; flagAllForRender(); },
         resize: resizeVisible,
     };

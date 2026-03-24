@@ -201,6 +201,7 @@ def project_dashboard(project_name: str):
         hx_swap="none",
         hx_include="#runs-form",
         hx_indicator="#main-refresh-btn",
+        hx_sync="this:replace",
         cls="flex flex-col gap-3 shrink-0",
     )
 
@@ -214,6 +215,8 @@ def project_dashboard(project_name: str):
         hx_swap="innerHTML",
         hx_include=f"#{controls_form.id}",
         hx_indicator="#main-refresh-btn",
+        hx_sync="this:replace",
+        hx_on__before_request="Charts.clearQueue()",
         cls="flex flex-col flex-1 min-h-0",
     )
 
@@ -247,6 +250,7 @@ def project_dashboard(project_name: str):
             hx_include="#runs-form, #controls-form",
             hx_target=main_id,
             hx_swap="innerHTML",
+            hx_sync="this:replace",
         ),
         cls="p-4 border-t bg-card shrink-0",
     )
