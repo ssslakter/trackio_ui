@@ -1,9 +1,14 @@
 const Charts = (() => {
-    const instances = new Map();  // metricPath -> ECharts instance
-    const dataCache = new Map();  // metricPath -> { runName: {x, y} }
+    const instances = new Map();    // metricPath -> ECharts instance
+    const dataCache = new Map();    // metricPath -> { runName: {x, y, ts?} }
     const runColors = new Map();
-    const visibleCharts = new Set(); // Keep track of visible charts
-    const renderedSchema = new Set(); // tracks what's currently rendered
+    const visibleCharts = new Set();   // Keep track of visible charts
+    const renderedSchema = new Set();  // tracks what's currently rendered
+
+    // Paths that always use a time x-axis (system/* metrics).
+    const timeAxisPaths = new Set();
+    // Paths that have optional timestamps alongside steps (normal metrics with "ts").
+    const tsOptionalPaths = new Set();
 
     let logX = false, logY = false;
     let modalInstance = null;
@@ -65,6 +70,16 @@ const Charts = (() => {
             .map(el => el.dataset.metric);
     }
 
+    function ingestAxisMetadata(raw) {
+        // Register which paths use a forced time axis and which have optional timestamps.
+        if (raw.time_axis_paths) {
+            for (const p of raw.time_axis_paths) timeAxisPaths.add(p);
+        }
+        if (raw.ts_optional_paths) {
+            for (const p of raw.ts_optional_paths) tsOptionalPaths.add(p);
+        }
+    }
+
     function ingestData(payload, isLive = false) {
         let needsLayoutRefresh = false;
         const existingSchema = new Set(getCurrentSchema());
@@ -107,32 +122,65 @@ const Charts = (() => {
         return runColors.get(run);
     }
 
-    function buildSeries(path) {
-        const EPS = 1e-10;
-        return Object.entries(dataCache.get(path) ?? {}).map(([run, { x, y }]) => ({
-            name: run, type: 'line',
-            data: x.map((v, i) => [logX ? Math.max(EPS, v) : v,
-            logY ? Math.max(EPS, y[i]) : y[i]]),
-            showSymbol: false, animation: false,
-            lineStyle: { width: 1.5 },
-            itemStyle: { color: colorFor(run) },
-        }));
+    /**
+     * Returns true if this path should render its x-axis as wall-clock time.
+     * System metrics always use time. Step metrics use time only if they have
+     * timestamps AND logX is off (log(time) is not meaningful).
+     */
+    function isTimeAxis(path) {
+        if (timeAxisPaths.has(path)) return true;
+        // Future: could let the user toggle tsOptionalPaths via a UI control.
+        return false;
     }
 
-    function buildChartOptions(series, colors, extra = {}) {
+    function buildSeries(path) {
         const EPS = 1e-10;
+        const useTime = isTimeAxis(path);
+
+        return Object.entries(dataCache.get(path) ?? {}).map(([run, series]) => {
+            const { x, y, ts } = series;
+            // For time-axis charts use timestamps (ms); for step-axis use steps.
+            // ts is present on time-optional step metrics; x is always present.
+            const xData = useTime ? (ts ?? x) : x;
+
+            const data = xData.map((v, i) => [
+                (!useTime && logX) ? Math.max(EPS, v) : v,
+                logY ? Math.max(EPS, y[i]) : y[i],
+            ]);
+
+            return {
+                name: run, type: 'line',
+                data,
+                showSymbol: false, animation: false,
+                lineStyle: { width: 1.5 },
+                itemStyle: { color: colorFor(run) },
+            };
+        });
+    }
+
+    function buildChartOptions(series, colors, path = '', extra = {}) {
+        const EPS = 1e-10;
+        const useTime = isTimeAxis(path);
+
+        // Time-axis charts never support log-x (log(unix_ms) is meaningless).
+        const xAxisType = useTime ? 'time' : (logX ? 'log' : 'value');
+
         const opts = {
             animation: false,
             tooltip: {
                 trigger: 'axis', confine: true,
                 axisPointer: { type: 'line', animation: false },
-                formatter: tooltipFormatter,
+                formatter: useTime ? timeTooltipFormatter : tooltipFormatter,
                 backgroundColor: colors.tooltipBg,
                 borderColor: colors.tooltipBorder,
                 textStyle: { color: colors.text, fontSize: 12 },
             },
             grid: extra.grid ?? { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
-            xAxis: { type: logX ? 'log' : 'value', scale: true, min: logX ? EPS : undefined },
+            xAxis: {
+                type: xAxisType,
+                scale: !useTime,
+                min: (!useTime && logX) ? EPS : undefined,
+            },
             yAxis: {
                 type: logY ? 'log' : 'value', scale: true, min: logY ? EPS : undefined,
                 splitLine: { lineStyle: { type: 'dashed', opacity: 0.05 } },
@@ -155,6 +203,17 @@ const Charts = (() => {
             .map(p => `${p.marker} ${p.seriesName}: <b>${p.value[1].toFixed(4)}</b>`)
             .join('<br>');
         return `<small>${params[0].axisValueLabel}</small><br>${rows}`;
+    }
+
+    function timeTooltipFormatter(params) {
+        if (!params.length) return '';
+        const ts = params[0].value?.[0];
+        const label = ts != null ? new Date(ts).toLocaleString() : params[0].axisValueLabel;
+        const rows = params
+            .filter(p => p.value?.[1] != null)
+            .map(p => `${p.marker} ${p.seriesName}: <b>${p.value[1].toFixed(4)}</b>`)
+            .join('<br>');
+        return `<small>${label}</small><br>${rows}`;
     }
 
     function renderVisible() {
@@ -186,7 +245,7 @@ const Charts = (() => {
             instances.set(path, chart);
         }
         chart.setOption(
-            buildChartOptions(buildSeries(path), themeColors()),
+            buildChartOptions(buildSeries(path), themeColors(), path),
             { notMerge: true }
         );
     }
@@ -204,7 +263,7 @@ const Charts = (() => {
         }
 
         modalInstance.setOption(
-            buildChartOptions(buildSeries(path), themeColors(), {
+            buildChartOptions(buildSeries(path), themeColors(), path, {
                 grid: { left: '8%', right: '4%', top: '8%', bottom: '22%', containLabel: true },
                 dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: '8%' }],
             }),
@@ -262,6 +321,9 @@ const Charts = (() => {
         const raw = JSON.parse(island.textContent);
         if (!raw.data) return;
         const { data, runs, schema_changed } = raw;
+
+        ingestAxisMetadata(raw);
+
         if (schema_changed) {
             instances.forEach(c => c.dispose());
             instances.clear();
@@ -291,7 +353,10 @@ const Charts = (() => {
     });
 
     document.addEventListener('charts:data', e => ingestData(e.detail, false));
-    document.addEventListener('charts:live_data', e => ingestData(e.detail, true));
+    document.addEventListener('charts:live_data', e => {
+        ingestAxisMetadata(e.detail);
+        ingestData(e.detail.data ?? e.detail, true);
+    });
 
     return {
         observeAll, ingestData, pruneRuns, setLogAxes, openModal,

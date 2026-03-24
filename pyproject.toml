@@ -10,7 +10,7 @@ dependencies = [
     "click",
     "pandas",
     "pyarrow",
-    "trackio",
+    "trackio[gpu]",
 ]
 name = "trackio_ui"
 requires-python = ">= 3.11"

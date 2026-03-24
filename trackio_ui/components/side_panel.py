@@ -53,6 +53,7 @@ def RunsListItems(runs_names: list[str], id="runs-list-inner"):
 
 def RunsListComponent(project_name: str, runs_names: list[str], id="runs-list-container"):
     """Outer container holding the header, buttons, and Alpine.js state."""
+    from trackio_ui.main import get_runs
     alpine_data = "{ selected: $persist([]), allIds: [] }"
 
     header = Div(
@@ -68,9 +69,11 @@ def RunsListComponent(project_name: str, runs_names: list[str], id="runs-list-co
         Button(
             UkIcon("refresh-cw", height=14, width=14, cls="spin-indicator"),
             title="Refresh Runs List",
-            hx_get=f"/{project_name}/runs",
+            hx_get=get_runs.to(project_name=project_name),
             hx_target="#runs-list-inner",
             hx_swap="outerHTML",
+            hx_include="this",
+            hx_indicator="this",
             cls="btn btn-xs btn-ghost p-1 opacity-50 hover:opacity-100 transition-opacity flex items-center justify-center",
         ),
         cls="flex items-center justify-between mb-2",

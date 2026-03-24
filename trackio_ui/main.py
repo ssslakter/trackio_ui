@@ -6,7 +6,7 @@ import json, orjson, tempfile, click
 from pathlib import Path
 from fasthtml.common import *
 from monsterui.all import *
-from .data import TrackioDatabase, prepare_metrics
+from .data import TrackioDatabase, prepare_step_metrics, prepare_system_metrics
 from .components import *
 from .utils import *
 
@@ -282,6 +282,34 @@ def project_dashboard(project_name: str):
     )
 
 
+def _merge_data_payloads(step_data: dict, system_data: dict) -> dict:
+    """Merge step-metric and system-metric payloads into one {run: {path: series}} dict."""
+    merged: dict = {}
+    for run, series in step_data.items():
+        merged.setdefault(run, {}).update(series)
+    for run, series in system_data.items():
+        merged.setdefault(run, {}).update(series)
+    return merged
+
+
+def _collect_time_axis_paths(system_data: dict) -> list[str]:
+    """Return the union of all system/* paths across all runs."""
+    paths: set[str] = set()
+    for series in system_data.values():
+        paths.update(series.keys())
+    return sorted(paths)
+
+
+def _collect_timestamp_paths(step_data: dict) -> list[str]:
+    """Return paths from step metrics whose series include a 'ts' field."""
+    paths: set[str] = set()
+    for series_map in step_data.values():
+        for path, series in series_map.items():
+            if "ts" in series:
+                paths.add(path)
+    return sorted(paths)
+
+
 @rt("/{project_name}/layout")
 def get_charts(
     project_name: str,
@@ -298,14 +326,28 @@ def get_charts(
     prev_schema = state.get("schema", [])
 
     project_state[project_name] = {"runs": filtered_runs, "smoothing": smoothing, "max_points": max_points}
-    metrics, new_schema = db.get_metrics_and_schema(filtered_runs)
-    data = prepare_metrics(metrics, smoothing=smoothing, max_points=max_points)
+    metrics_result, new_schema = db.get_metrics_and_schema(filtered_runs)
+
+    step_data = prepare_step_metrics(metrics_result.step_metrics, smoothing=smoothing, max_points=max_points)
+    system_data = prepare_system_metrics(metrics_result.system_metrics, max_points=max_points)
+
+    data = _merge_data_payloads(step_data, system_data)
+
+    time_axis_paths = _collect_time_axis_paths(system_data)
+    ts_optional_paths = _collect_timestamp_paths(step_data)
 
     schema_changed = set(prev_schema) != set(new_schema)
     project_state[project_name]["schema"] = new_schema
 
     data_json = orjson.dumps(
-        {"data": data, "runs": filtered_runs, "schema_changed": schema_changed}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
+        {
+            "data": data,
+            "runs": filtered_runs,
+            "schema_changed": schema_changed,
+            "time_axis_paths": time_axis_paths,
+            "ts_optional_paths": ts_optional_paths,
+        },
+        option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS,
     ).decode()
     data_island = Script(data_json, type="application/json", id="chart-data-payload", hx_swap_oob="true")
     if not schema_changed and runs:
@@ -318,8 +360,11 @@ shutdown_event = signal_shutdown()
 
 async def live_generator(project_name: str):
     db = get_db(project_name)
-    run_states = {}
-    run_active_ticks = {}
+    # step metrics state: run_name -> last known step
+    run_step_states: dict[str, int] = {}
+    # system metrics state: run_name -> last known timestamp
+    run_sys_states: dict[str, float] = {}
+    run_active_ticks: dict[str, int] = {}
     tick_count = 0
 
     try:
@@ -329,7 +374,8 @@ async def live_generator(project_name: str):
             smoothing = state.get("smoothing", 0.0)
             max_points = state.get("max_points", 0)
 
-            run_states = {r: run_states.get(r, -1) for r in current_runs}
+            run_step_states = {r: run_step_states.get(r, -1) for r in current_runs}
+            run_sys_states = {r: run_sys_states.get(r, -1.0) for r in current_runs}
             run_active_ticks = {r: run_active_ticks.get(r, 0) for r in current_runs}
 
             runs_to_check = []
@@ -340,25 +386,56 @@ async def live_generator(project_name: str):
 
             if runs_to_check:
                 max_steps = await asyncio.to_thread(db.get_max_steps, runs_to_check)
+                max_sys_ts = await asyncio.to_thread(db.get_max_system_timestamps, runs_to_check)
 
-                runs_to_fetch = {}
+                runs_to_fetch_steps: dict[str, int] = {}
+                runs_to_fetch_sys: dict[str, float] = {}
+                any_new = False
+
                 for r in runs_to_check:
                     m_step = max_steps.get(r, -1)
-                    if m_step > run_states.get(r, -1):
-                        runs_to_fetch[r] = run_states.get(r, -1)
-                    else:
+                    if m_step > run_step_states.get(r, -1):
+                        runs_to_fetch_steps[r] = run_step_states.get(r, -1)
+                        any_new = True
+
+                    m_ts = max_sys_ts.get(r, -1.0)
+                    print(m_ts, run_sys_states.get(r, -1.0))
+                    if m_ts > run_sys_states.get(r, -1.0):
+                        runs_to_fetch_sys[r] = run_sys_states.get(r, -1.0)
+                        any_new = True
+
+                    if not any_new:
                         run_active_ticks[r] = run_active_ticks.get(r, 0) + 1
 
-                if runs_to_fetch:
-                    updated_dfs = await asyncio.to_thread(db.fetch_new_metrics, runs_to_fetch)
+                updated_step_dfs = {}
+                updated_sys_dfs = {}
 
-                    for r in updated_dfs.keys():
-                        run_states[r] = max_steps.get(r, run_states.get(r, -1))
+                if runs_to_fetch_steps:
+                    updated_step_dfs = await asyncio.to_thread(db.fetch_new_metrics, runs_to_fetch_steps)
+                    for r in updated_step_dfs:
+                        run_step_states[r] = max_steps.get(r, run_step_states.get(r, -1))
                         run_active_ticks[r] = 0
 
-                    if updated_dfs:
-                        prepared = await asyncio.to_thread(prepare_metrics, updated_dfs, smoothing, max_points)
-                        yield sse_json({"data": prepared}, event="data_update")
+                if runs_to_fetch_sys:
+                    updated_sys_dfs = await asyncio.to_thread(db.fetch_new_system_metrics, runs_to_fetch_sys)
+                    for r in updated_sys_dfs:
+                        run_sys_states[r] = max_sys_ts.get(r, run_sys_states.get(r, -1.0))
+                        run_active_ticks[r] = 0
+
+                if updated_step_dfs or updated_sys_dfs:
+                    step_data = await asyncio.to_thread(prepare_step_metrics, updated_step_dfs, smoothing, max_points)
+                    sys_data = await asyncio.to_thread(prepare_system_metrics, updated_sys_dfs, max_points)
+                    merged = _merge_data_payloads(step_data, sys_data)
+                    time_axis_paths = _collect_time_axis_paths(sys_data)
+                    ts_optional_paths = _collect_timestamp_paths(step_data)
+                    yield sse_json(
+                        {
+                            "data": merged,
+                            "time_axis_paths": time_axis_paths,
+                            "ts_optional_paths": ts_optional_paths,
+                        },
+                        event="data_update",
+                    )
 
             tick_count += 1
             await asyncio.sleep(1)
@@ -378,7 +455,7 @@ async def live_stream(project_name: str):
 def main(host, port, project):
     if project:
         os.environ["TRACKIO_DEFAULT_PROJECT"] = project
-    serve(host=host, port=port, reload=False, appname="trackio_ui.main")
+    serve(host=host, port=port, reload=True, appname="trackio_ui.main")
 
 
 if __name__ == "__main__":
