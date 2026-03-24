@@ -3,6 +3,7 @@ const Charts = (() => {
     const dataCache = new Map();  // metricPath -> { runName: {x, y} }
     const runColors = new Map();
     const visibleCharts = new Set(); // Keep track of visible charts
+    const renderedSchema = new Set(); // tracks what's currently rendered
 
     let logX = false, logY = false;
     let modalInstance = null;
@@ -266,8 +267,14 @@ const Charts = (() => {
             instances.clear();
             runColors.clear();
             visibleCharts.clear();
+            renderedSchema.clear();
             observer.disconnect();
             observeAll();
+        }
+        for (const [run, metrics] of Object.entries(data)) {
+            for (const path of Object.keys(metrics)) {
+                renderedSchema.add(path);
+            }
         }
         pruneRuns(runs);
         ingestData(data);
@@ -294,10 +301,3 @@ const Charts = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', Charts.observeAll);
-
-document.addEventListener('htmx:configRequest', e => {
-    if (!e.detail.path.includes('/layout')) return;
-    Charts.getCurrentSchema().forEach(path =>
-        e.detail.parameters.append('current_schema', path)
-    );
-});

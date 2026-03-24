@@ -57,34 +57,61 @@ def GroupPanel(*content, label: str, id: str, open: bool = True, card: bool = Fa
 
 
 def _render(node: dict[str, dict[str, Any] | None], prefix: str = "") -> list:
-    cards = [ChartCard(f"{prefix}/{k}".lstrip("/")) for k, v in sorted(node.items()) if v is None]
-    folders = [
-        GroupPanel(
-            *_render(v, f"{prefix}/{k}".lstrip("/")),
-            label=k,
-            id=f"folder-{_slug(f'{prefix}/{k}'.lstrip('/'))}",
-            card=False,
-        )
-        for k, v in sorted(node.items())
-        if v is not None
-    ]
+    cards = []
+    folders = []
+
+    for k, v in sorted(node.items()):
+        if k == _SELF:
+            continue
+        path = f"{prefix}/{k}".lstrip("/")
+        if v is None:
+            cards.append(ChartCard(path))
+        else:
+            if _SELF in v:
+                cards.append(ChartCard(path))
+            inner = {ik: iv for ik, iv in v.items() if ik != _SELF}
+            if inner:
+                folders.append(
+                    GroupPanel(
+                        *_render(inner, path),
+                        label=k,
+                        id=f"folder-{_slug(path)}",
+                        card=False,
+                    )
+                )
     if cards:
         cards_grid = Div(*cards, cls="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4")
         charts_block = [GroupPanel(cards_grid, label="metrics", id="folder-metrics", card=True)] if prefix == "" else [cards_grid]
     else:
         charts_block = []
+
     return charts_block + folders
+
+
+_SELF = "_self"
 
 
 def _tree(paths: list[str]) -> dict[str, dict[str, Any] | None]:
     t: dict[str, dict[str, Any] | None] = {}
+
     for path in sorted(paths):
         parts = path.split("/")
-        node: dict[str, dict[str, Any] | None] = t
+        node = t
+
         for p in parts[: min(len(parts) - 1, MAX_DEPTH)]:
-            existing = node.setdefault(p, {})
-            node = existing if isinstance(existing, dict) else node
-        node["/".join(parts[min(len(parts) - 1, MAX_DEPTH) :])] = None
+            existing = node.get(p)
+            if existing is None and p not in node:  # type: ignore
+                node[p] = {}
+            elif existing is None and p in node:  # type: ignore
+                node[p] = {_SELF: None}
+            node = node[p]
+
+        leaf_key = "/".join(parts[min(len(parts) - 1, MAX_DEPTH) :])
+
+        if node and leaf_key in node and isinstance(node[leaf_key], dict):
+            node[leaf_key][_SELF] = None
+        else:
+            node[leaf_key] = None
     return t
 
 

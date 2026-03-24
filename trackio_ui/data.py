@@ -2,6 +2,7 @@ from typing import Optional, Union
 import orjson, polars as pl
 import pandas as pd, numpy as np
 from pathlib import Path
+from datetime import datetime
 from fastlite import *
 
 
@@ -40,7 +41,12 @@ class TrackioDatabase:
         """Returns metrics for the specified run names."""
         if not run_names:
             return []
-        return self.db.t.metrics(f"run_name in ({','.join(['?'] * len(run_names))})", run_names)
+        placeholders = ",".join(["?"] * len(run_names))
+        m = self.db.t.metrics(f"run_name in ({placeholders})", run_names)
+        s = []
+        if "system_metrics" in self.db.t:
+            s = self.db.t.system_metrics(f"run_name in ({placeholders})", run_names)
+        return m + s
 
     def get_metrics(self, run_names: list[str], refresh: bool = True) -> dict:
         if isinstance(run_names, str):

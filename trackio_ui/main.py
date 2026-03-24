@@ -150,6 +150,8 @@ def sse_toggle(project_name: str, req: Request):
 
 @rt("/{project_name}")
 def project_dashboard(project_name: str):
+    if project_name in project_state:
+        project_state[project_name].pop("schema", None)
     db = get_db(project_name)
     runs = db.get_runs()
 
@@ -219,7 +221,7 @@ def project_dashboard(project_name: str):
             hx_swap="innerHTML",
         ),
         x_data="{ live: $persist(false).as('trackio_live_updates') }",
-        cls="pb-2 pt-1"
+        cls="pb-2 pt-1",
     )
 
     controls_section = SidebarSection(
@@ -291,10 +293,17 @@ def get_charts(
     db = get_db(project_name)
     runs = runs or []
     filtered_runs = [r for r in db.get_runs() if r in runs]
+
+    state = project_state.get(project_name, {})
+    prev_schema = state.get("schema", [])
+
     project_state[project_name] = {"runs": filtered_runs, "smoothing": smoothing, "max_points": max_points}
     metrics, new_schema = db.get_metrics_and_schema(filtered_runs)
     data = prepare_metrics(metrics, smoothing=smoothing, max_points=max_points)
-    schema_changed = set(current_schema or []) != set(new_schema)
+
+    schema_changed = set(prev_schema) != set(new_schema)
+    project_state[project_name]["schema"] = new_schema
+
     data_json = orjson.dumps(
         {"data": data, "runs": filtered_runs, "schema_changed": schema_changed}, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_NON_STR_KEYS
     ).decode()
