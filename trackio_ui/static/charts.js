@@ -10,7 +10,7 @@ const Charts = (() => {
     // Paths that have optional timestamps alongside steps (normal metrics with "ts").
     const tsOptionalPaths = new Set();
 
-    let logX = false, logY = false;
+    let logX = false, logY = false, useTime = false;
     let modalInstance = null;
 
     // --- Theme helpers ---
@@ -63,6 +63,24 @@ const Charts = (() => {
         document.querySelectorAll('[data-metric]').forEach(el => observer.observe(el));
     }
 
+    // --- Formatter ---
+
+    function formatDuration(sec) {
+        if (sec == null || isNaN(sec)) return '';
+        const isNeg = sec < 0;
+        sec = Math.abs(sec);
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = sec < 60 ? (sec % 60).toFixed(1) : Math.floor(sec % 60);
+
+        let res = '';
+        if (h > 0) res = `${h}h ${m}m`;
+        else if (m > 0) res = `${m}m ${Math.floor(sec % 60)}s`;
+        else res = `${s}s`;
+
+        return isNeg ? "-" + res : res;
+    }
+
     // --- Data ---
 
     function getCurrentSchema() {
@@ -71,7 +89,6 @@ const Charts = (() => {
     }
 
     function ingestAxisMetadata(raw) {
-        // Register which paths use a forced time axis and which have optional timestamps.
         if (raw.time_axis_paths) {
             for (const p of raw.time_axis_paths) timeAxisPaths.add(p);
         }
@@ -123,28 +140,24 @@ const Charts = (() => {
     }
 
     /**
-     * Returns true if this path should render its x-axis as wall-clock time.
-     * System metrics always use time. Step metrics use time only if they have
-     * timestamps AND logX is off (log(time) is not meaningful).
+     * Returns true if this path should render its x-axis as wall-clock duration time.
      */
     function isTimeAxis(path) {
         if (timeAxisPaths.has(path)) return true;
-        // Future: could let the user toggle tsOptionalPaths via a UI control.
+        if (useTime && tsOptionalPaths.has(path)) return true;
         return false;
     }
 
     function buildSeries(path) {
         const EPS = 1e-10;
-        const useTime = isTimeAxis(path);
+        const useTimeAxis = isTimeAxis(path);
 
         return Object.entries(dataCache.get(path) ?? {}).map(([run, series]) => {
             const { x, y, ts } = series;
-            // For time-axis charts use timestamps (ms); for step-axis use steps.
-            // ts is present on time-optional step metrics; x is always present.
-            const xData = useTime ? (ts ?? x) : x;
+            const xData = (useTimeAxis && ts) ? ts : x;
 
             const data = xData.map((v, i) => [
-                (!useTime && logX) ? Math.max(EPS, v) : v,
+                logX ? Math.max(EPS, v) : v,
                 logY ? Math.max(EPS, y[i]) : y[i],
             ]);
 
@@ -160,26 +173,24 @@ const Charts = (() => {
 
     function buildChartOptions(series, colors, path = '', extra = {}) {
         const EPS = 1e-10;
-        const useTime = isTimeAxis(path);
-
-        // Time-axis charts never support log-x (log(unix_ms) is meaningless).
-        const xAxisType = useTime ? 'time' : (logX ? 'log' : 'value');
+        const useTimeAxis = isTimeAxis(path);
 
         const opts = {
             animation: false,
             tooltip: {
                 trigger: 'axis', confine: true,
                 axisPointer: { type: 'line', animation: false },
-                formatter: useTime ? timeTooltipFormatter : tooltipFormatter,
+                formatter: useTimeAxis ? timeTooltipFormatter : tooltipFormatter,
                 backgroundColor: colors.tooltipBg,
                 borderColor: colors.tooltipBorder,
                 textStyle: { color: colors.text, fontSize: 12 },
             },
             grid: extra.grid ?? { left: '8%', right: '4%', top: '10%', bottom: '15%', containLabel: true },
             xAxis: {
-                type: xAxisType,
-                scale: !useTime,
-                min: (!useTime && logX) ? EPS : undefined,
+                type: logX ? 'log' : 'value',
+                scale: !useTimeAxis,
+                min: logX ? EPS : undefined,
+                axisLabel: useTimeAxis ? { formatter: formatDuration } : undefined
             },
             yAxis: {
                 type: logY ? 'log' : 'value', scale: true, min: logY ? EPS : undefined,
@@ -207,8 +218,8 @@ const Charts = (() => {
 
     function timeTooltipFormatter(params) {
         if (!params.length) return '';
-        const ts = params[0].value?.[0];
-        const label = ts != null ? new Date(ts).toLocaleString() : params[0].axisValueLabel;
+        const val = params[0].value?.[0];
+        const label = val != null ? formatDuration(val) : params[0].axisValueLabel;
         const rows = params
             .filter(p => p.value?.[1] != null)
             .map(p => `${p.marker} ${p.seriesName}: <b>${p.value[1].toFixed(4)}</b>`)
@@ -287,8 +298,8 @@ const Charts = (() => {
 
     // --- Settings ---
 
-    function setLogAxes(x, y) {
-        logX = x; logY = y;
+    function setAxes(x, y, t) {
+        logX = x; logY = y; useTime = t;
         renderVisible();
         if (modalInstance) {
             const path = document.getElementById('chart-modal-title')?.textContent;
@@ -343,7 +354,6 @@ const Charts = (() => {
     });
 
     document.addEventListener('htmx:beforeSwap', e => {
-        // Only clear out when the actual content pane swaps
         if (e.detail.target.id === 'main-content') {
             instances.forEach(c => c.dispose());
             instances.clear();
@@ -359,7 +369,7 @@ const Charts = (() => {
     });
 
     return {
-        observeAll, ingestData, pruneRuns, setLogAxes, openModal,
+        observeAll, ingestData, pruneRuns, setAxes, openModal,
         getCurrentSchema,
         resize: () => instances.forEach(c => c.resize()),
     };

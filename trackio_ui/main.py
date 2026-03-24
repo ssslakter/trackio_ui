@@ -185,9 +185,10 @@ def project_dashboard(project_name: str):
         Div(
             LabeledCheckbox("log-x Axis", "log-x-axis", cls_colors="checkbox-secondary", x_model="logX"),
             LabeledCheckbox("log-y Axis", "log-y-axis", cls_colors="checkbox-secondary", x_model="logY"),
+            LabeledCheckbox("Wall-Clock", "use-time-axis", cls_colors="checkbox-secondary", x_model="useTime"),
             cls="flex flex-row flex-wrap gap-4",
-            x_data="{ logX: false, logY: false }",
-            **{"@change": "Charts.setLogAxes(logX, logY)"},
+            x_data="{ logX: false, logY: false, useTime: false }",
+            **{"@change": "Charts.setAxes(logX, logY, useTime)"},
         ),
         id="controls-form",
         hx_post=get_charts.to(project_name=project_name),
@@ -328,8 +329,9 @@ def get_charts(
     project_state[project_name] = {"runs": filtered_runs, "smoothing": smoothing, "max_points": max_points}
     metrics_result, new_schema = db.get_metrics_and_schema(filtered_runs)
 
-    step_data = prepare_step_metrics(metrics_result.step_metrics, smoothing=smoothing, max_points=max_points)
-    system_data = prepare_system_metrics(metrics_result.system_metrics, max_points=max_points)
+    run_starts = db.get_run_starts(filtered_runs)
+    step_data = prepare_step_metrics(metrics_result.step_metrics, run_starts, smoothing=smoothing, max_points=max_points)
+    system_data = prepare_system_metrics(metrics_result.system_metrics, run_starts, max_points=max_points)
 
     data = _merge_data_payloads(step_data, system_data)
 
@@ -387,6 +389,7 @@ async def live_generator(project_name: str):
             if runs_to_check:
                 max_steps = await asyncio.to_thread(db.get_max_steps, runs_to_check)
                 max_sys_ts = await asyncio.to_thread(db.get_max_system_timestamps, runs_to_check)
+                run_starts = await asyncio.to_thread(db.get_run_starts, runs_to_check)
 
                 runs_to_fetch_steps: dict[str, int] = {}
                 runs_to_fetch_sys: dict[str, float] = {}
@@ -399,7 +402,6 @@ async def live_generator(project_name: str):
                         any_new = True
 
                     m_ts = max_sys_ts.get(r, -1.0)
-                    print(m_ts, run_sys_states.get(r, -1.0))
                     if m_ts > run_sys_states.get(r, -1.0):
                         runs_to_fetch_sys[r] = run_sys_states.get(r, -1.0)
                         any_new = True
@@ -423,8 +425,8 @@ async def live_generator(project_name: str):
                         run_active_ticks[r] = 0
 
                 if updated_step_dfs or updated_sys_dfs:
-                    step_data = await asyncio.to_thread(prepare_step_metrics, updated_step_dfs, smoothing, max_points)
-                    sys_data = await asyncio.to_thread(prepare_system_metrics, updated_sys_dfs, max_points)
+                    step_data = await asyncio.to_thread(prepare_step_metrics, updated_step_dfs, run_starts, smoothing, max_points)
+                    sys_data = await asyncio.to_thread(prepare_system_metrics, updated_sys_dfs, run_starts, max_points)
                     merged = _merge_data_payloads(step_data, sys_data)
                     time_axis_paths = _collect_time_axis_paths(sys_data)
                     ts_optional_paths = _collect_timestamp_paths(step_data)

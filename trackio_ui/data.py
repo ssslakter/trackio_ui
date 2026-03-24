@@ -37,6 +37,17 @@ class TrackioDatabase:
             r.update(orjson.loads(r.pop("config")))
         return runs
 
+    def get_run_starts(self, run_names: list[str]) -> dict[str, float]:
+        """Returns the start timestamp (in unix seconds) for the given runs based on their created_at."""
+        if not run_names:
+            return {}
+        placeholders = ",".join(["?"] * len(run_names))
+        res = self.db.q(
+            f"SELECT run_name, config FROM configs WHERE run_name IN ({placeholders})",
+            run_names,
+        )
+        return {r["run_name"]: datetime.fromisoformat(orjson.loads(r["config"])["_Created"]).timestamp() for r in res}
+
     def delete_runs(self, run_names: list[str]):
         """Deletes runs and their associated metrics."""
         if not run_names:
@@ -202,8 +213,6 @@ def process_metrics_to_dict(raw_metrics) -> MetricsResult:
         else:
             step = row["step"]
             key = (run, step)
-            if "timestamp" in new_metrics:
-                new_metrics["_timestamp"] = new_metrics.pop("timestamp")
             step_schema.update({k: pl.Float64 for k in new_metrics.keys()})
             if key in step_data:
                 step_data[key].update(new_metrics)
@@ -231,24 +240,20 @@ def process_metrics_to_dict(raw_metrics) -> MetricsResult:
 
 def prepare_step_metrics(
     metrics: dict[str, pd.DataFrame],
+    run_starts: dict[str, float],
     smoothing: float = 0,
     max_points: int = 0,
 ) -> dict:
     """
     Converts step-indexed DataFrames into the {run: {path: {x, y, ts?}}} payload
     consumed by the frontend.
-
-    - smoothing: EWM alpha applied before downsampling.
-    - max_points: cap per series; 0 = unlimited.
-    - ts: if the DataFrame contains a "_timestamp" column, the downsampled
-      timestamps are included so the frontend can optionally switch to a
-      clock-time x-axis.
     """
     processed_data = {}
     for run_name, df in metrics.items():
         if df.empty:
             continue
 
+        run_start = run_starts.get(run_name, 0.0)
         has_ts = "_timestamp" in df.columns
         ts_col: Optional[np.ndarray] = df["_timestamp"].to_numpy() if has_ts else None
         value_df = df.drop(columns=["_timestamp"]) if has_ts else df
@@ -279,7 +284,7 @@ def prepare_step_metrics(
 
             entry: dict = {"x": x, "y": np.round(y, 6)}
             if has_ts and ts_series is not None:
-                entry["ts"] = (ts_series * 1000).astype(np.int64)
+                entry["ts"] = np.round(ts_series - run_start, 2)
             run_entry[col] = entry
 
         if run_entry:
@@ -290,26 +295,27 @@ def prepare_step_metrics(
 
 def prepare_system_metrics(
     metrics: dict[str, pd.DataFrame],
+    run_starts: dict[str, float],
     max_points: int = 0,
 ) -> dict:
     """
     Converts timestamp-indexed system metric DataFrames into the frontend payload.
 
-    x values are unix milliseconds (int64) so ECharts can use xAxis.type='time'.
-    No smoothing is applied to system metrics.
+    x values are relative run duration seconds. No smoothing is applied to system metrics.
     """
     processed_data = {}
     for run_name, df in metrics.items():
         if df.empty:
             continue
 
-        ts_ms = (df.index.to_numpy() * 1000).astype(np.int64)
+        ts_sec = df.index.to_numpy()
+        run_start = run_starts.get(run_name, 0.0)
         run_entry = {}
 
         for col in df.columns:
             vals = df[col].to_numpy()
             mask = ~np.isnan(vals)
-            x = ts_ms[mask]
+            x = ts_sec[mask]
             y = vals[mask]
 
             if len(x) == 0:
@@ -318,7 +324,7 @@ def prepare_system_metrics(
             if max_points != 0 and len(x) > max_points:
                 x, y = min_max_downsample(x, y, int(max_points))
 
-            run_entry[f"system/{col}"] = {"x": x, "y": np.round(y, 6)}
+            run_entry[f"system/{col}"] = {"x": np.round(x - run_start, 2), "y": np.round(y, 6)}
 
         if run_entry:
             processed_data[run_name] = run_entry
@@ -327,21 +333,7 @@ def prepare_system_metrics(
 
 
 def min_max_downsample(x, y, target_points, aux: Optional[np.ndarray] = None):
-    """
-    LTTB-style min/max downsampler.  Preserves peaks and troughs within
-    equal-width index buckets.
-
-    Parameters
-    ----------
-    x, y       : input arrays (must be same length)
-    target_points : desired output length (approximate)
-    aux        : optional auxiliary array (e.g. timestamps) downsampled with
-                 the same indices — returned as a third element when provided.
-
-    Returns
-    -------
-    (x_ds, y_ds) or (x_ds, y_ds, aux_ds) if aux is not None
-    """
+    """LTTB-style min/max downsampler."""
     n = len(y)
     if n <= target_points:
         return (x, y, aux) if aux is not None else (x, y)
