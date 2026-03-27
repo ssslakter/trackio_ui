@@ -1,8 +1,8 @@
 # trackio-ui
 [![PyPI version](https://img.shields.io/pypi/v/trackio-ui.svg)](https://pypi.org/project/trackio-ui/)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/trackio-ui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/ssslakter/trackio_ui?style=social)](https://github.com/ssslakter/trackio_ui)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/trackio-ui)
 
 A simple UI for the trackio dashboard, written in **FastHTML**. The primary reason for creating this was the poor performance of the Gradio frontend for trackio.
 
