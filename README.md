@@ -1,6 +1,8 @@
-# trackio_ui
-
+# trackio-ui
+[![PyPI version](https://img.shields.io/pypi/v/trackio-ui.svg)](https://pypi.org/project/trackio-ui/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub stars](https://img.shields.io/github/stars/ssslakter/trackio_ui?style=social)](https://github.com/ssslakter/trackio_ui)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/trackio-ui)
 
 A simple UI for the trackio dashboard, written in **FastHTML**. The primary reason for creating this was the poor performance of the Gradio frontend for trackio.
 
@@ -10,13 +12,13 @@ With this UI, you can configure the maximum number of data points for graphs to 
 
 ## Installation
 ```sh
-pip install "trackio_ui @ git+https://github.com/ssslakter/trackio_ui.git"
+pip install trackio-ui
 ```
 
-You can also install a release version using a Git tag:
+You can also install the latest version using git:
 
 ```sh
-pip install "trackio_ui @ git+https://github.com/ssslakter/trackio_ui.git@vX.Y.Z"
+pip install "trackio-ui @ git+https://github.com/ssslakter/trackio_ui.git"
 ```
 
 ## Getting Started

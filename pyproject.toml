@@ -2,6 +2,7 @@
 authors = [
     { name = "Slava", email = "67190162+Ssslakter@users.noreply.github.com" },
 ]
+description = "UI to visualize experiments tracked with trackio"
 dependencies = [
     "orjson",
     "polars",
@@ -13,9 +14,30 @@ dependencies = [
     "trackio[gpu]",
 ]
 name = "trackio_ui"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">= 3.11"
-version = "0.1.0"
-optional-dependencies = { dev = ["ruff", "jupyter"] }
+version = "0.1.2"
+optional-dependencies = { dev = [
+    "ruff",
+    "jupyter",
+    "build",
+    "python-semantic-release",
+] }
+keywords = ["deep-learning", "training", "visualization", "experiment-tracking"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+"Repository" = "https://github.com/ssslakter/trackio_ui"
+
 
 [project.scripts]
 trackio-ui = "trackio_ui.main:main"
@@ -29,7 +51,7 @@ channels = ["conda-forge"]
 platforms = ["linux-64", "win-64", "osx-64", "osx-arm64"]
 
 [tool.pixi.environments]
-dev = { features = ["dev"] }
+dev = { features = ["dev"], solve-group = "default" }
 
 [tool.pixi.pypi-dependencies]
 trackio_ui = { path = ".", editable = true }
@@ -38,3 +60,15 @@ trackio_ui = { path = ".", editable = true }
 
 [tool.ruff]
 line-length = 160
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+commit_parser = "conventional"
+allow_zero_version = true
+major_on_zero = false
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["patch", "minor", "fix", "feat", "release"]
+minor_tags = ["minor", "feat"]
+patch_tags = ["fix", "patch", "release"]
+default_bump_level = 0
