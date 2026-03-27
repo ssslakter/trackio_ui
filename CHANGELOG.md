@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.1.4 (2026-03-27)
+
+### Bug Fixes
+
+- Clean up readme
+  ([`d7c6d11`](https://github.com/ssslakter/trackio_ui/commit/d7c6d11860b6dcf053de7143887f97e6a2c99072))
+
+- Rendering queue
+  ([`1823b9d`](https://github.com/ssslakter/trackio_ui/commit/1823b9d84f61890a958f7ecff5a8af593bc99ad5))
+
+
 ## v0.1.3 (2026-03-27)
 
 ### Release
