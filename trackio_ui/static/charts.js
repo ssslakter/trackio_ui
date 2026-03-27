@@ -165,10 +165,9 @@ const Charts = (() => {
 
     function flagAllForRender() {
         for (const path of dataCache.keys()) {
+            pendingRenders.add(path);
             if (visiblePaths.has(path)) {
                 queueForRender(path);
-            } else {
-                pendingRenders.add(path);
             }
         }
         if (modalInstance) {
@@ -226,10 +225,10 @@ const Charts = (() => {
                 if (!dataCache.has(path)) dataCache.set(path, {});
                 dataCache.get(path)[run] = series;
 
+                pendingRenders.add(path);
+
                 if (visiblePaths.has(path)) {
                     queueForRender(path);
-                } else {
-                    pendingRenders.add(path);
                 }
             }
         }
